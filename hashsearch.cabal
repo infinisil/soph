@@ -25,3 +25,4 @@ executable hashsearch
                      , async-pool
                      , vector
                      , mtl
+                     , process
