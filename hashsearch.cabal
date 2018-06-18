@@ -22,7 +22,6 @@ executable hashsearch
                      , text
                      , directory
                      , filepath
-                     , async-pool
                      , vector
                      , mtl
-                     , process
+                     , monad-logger

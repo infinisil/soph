@@ -5,26 +5,28 @@
 
 module Main where
 
-import           Control.Monad
+import           Control.Monad.Logger
 import           Control.Monad.Reader
+import           Control.Monad.State
 import           Data.Bits
 import           Data.Char
 import           Data.List
 import           Data.Maybe
+import           Data.Monoid
 import           Data.Ord
-import           Data.Text            (Text)
+import           Data.Text            (Text, pack, unpack)
 import qualified Data.Text            as Text
 import qualified Data.Vector          as V
 import           System.Directory
 import           System.Environment
 import           System.Exit
 import           System.FilePath
-import           System.Process
+import           System.Process.Text
 
 data Config = Config
-  { files     :: [FilePath]
-  , blockhash :: FilePath
+  { importdir :: FilePath
   , hashdir   :: FilePath
+  , blockhash :: FilePath
   , feh       :: FilePath
   } deriving Show
 
@@ -35,24 +37,27 @@ getConfig = do
     [] -> fail "No first argument supplied, should be hash directory"
     [hashdir] -> fail "No second argument supplied, should be import directory"
     hashdir:importdir:_ -> return (hashdir, importdir)
-  files <- fmap (importdir </>) <$> listDirectory importdir
   blockhash <- fromMaybe (fail "No hashblock binary found in PATH") <$> findExecutable "blockhash"
   feh <- fromMaybe (fail "No feh binary found in PATH") <$> findExecutable "feh"
   return Config
-    { files = files
+    { importdir = importdir
     , blockhash = blockhash
     , feh = feh
     , hashdir = hashdir
     }
 
-getHash :: Config -> FilePath -> IO (Maybe Hash)
-getHash Config { blockhash } file = do
-  (code, stdout, stderr) <- readProcessWithExitCode blockhash [ file ] ""
+showT :: Show a => a -> Text
+showT = pack . show
+
+getHash :: (MonadLogger m, MonadIO m, MonadReader Config m) => FilePath -> m (Maybe Hash)
+getHash file = do
+  blockhash <- asks blockhash
+  (code, stdout, stderr) <- liftIO $ readProcessWithExitCode blockhash [ file ] ""
   case code of
     ExitFailure code -> do
-      putStrLn $ "Error code " ++ show code ++ " while getting hash of file " ++ file ++ ": " ++ show stderr ++ show stdout
+      logErrorN $ "Error code " <> showT code <> " while getting hash of file " <> pack file <> ": " <> stderr <> stdout
       return Nothing
-    ExitSuccess -> return $ Just . V.fromList . takeWhile (/= ' ') $ stdout
+    ExitSuccess -> return $ Just . V.fromList . unpack . fst . Text.breakOn " " $ stdout
 
 type Hash = V.Vector Char
 
@@ -60,55 +65,66 @@ hammingDistance :: Hash -> Hash -> Int
 hammingDistance h1 h2 =
   V.sum $ V.map popCount $ V.zipWith xor (V.map digitToInt h1) (V.map digitToInt h2)
 
-type State = ([Hash], [FilePath])
+data ImportState = ImportState
+  { hashes  :: [Hash]
+  , skipped :: [FilePath]
+  }
 
-initial :: Config -> IO State
-initial Config { hashdir, files } = do
-  hashfiles <- listDirectory hashdir
-  return (V.fromList . dropExtensions <$> hashfiles, files)
+getHashes :: (MonadIO m, MonadReader Config m) => m [Hash]
+getHashes = do
+  hashdir <- asks hashdir
+  hashfiles <- liftIO $ listDirectory hashdir
+  return $ V.fromList . dropExtensions <$> hashfiles
 
-trans :: Config -> State -> IO (Maybe State)
-trans config (hashes, []) = do
-  putStrLn "All hashes imported"
-  return Nothing
-trans config@Config { hashdir, feh } (hashes, file:xs) = do
-  mnewhash <- getHash config file
+comparePics :: (MonadReader Config m, MonadIO m) => [FilePath] -> m ()
+comparePics pics = do
+  feh <- asks feh
+  liftIO $ readProcessWithExitCode feh (pics ++ ["-A", "rm %F"]) ""
+  return ()
+
+trans :: (MonadLogger m, MonadIO m, MonadState ImportState m, MonadReader Config m) => FilePath -> m ()
+trans file = do
+  mnewhash <- getHash file
   case mnewhash of
     Nothing -> do
-      putStrLn $ "Skipping " ++ file
-      return $ Just (hashes, xs)
+      logInfoN $ "Skipping " <> pack file
+      modify (\state@ImportState { skipped } -> state { skipped = takeFileName file : skipped })
     Just newhash -> do
-      let results = search newhash hashes
+      results <- search newhash
       unless (null results) $ do
-        putStrLn $ "Delete the ones you don't want of " ++ show results ++ " or the new file " ++ file ++ " (with hash " ++ V.toList newhash ++ ")"
-        hashfiles <- mapM (findFileWithHash config) results
-        callProcess feh (hashfiles ++ [ file ] ++ ["-A", "rm %F"])
-      filethere <- doesFileExist file
+        logInfoN $ "Delete the ones you don't want of " <> Text.concat (map (pack . show) results) <> " or the new file " <> pack file <> " (with hash " <> pack (V.toList newhash) <> ")"
+        hashfiles <- mapM findFileWithHash results
+        comparePics $ file : hashfiles
+      filethere <- liftIO $ doesFileExist file
       when filethere $ do
-        putStrLn $ "Moving file " ++ file ++ " to hashdir with hash " ++ show newhash
-        renameFile file (hashdir </> V.toList newhash ++ takeExtensions file)
-      return $ Just (newhash : hashes, xs)
+        logInfoN $ "Moving file " <> pack file <> " to hashdir with hash " <> pack (show newhash)
+        hashdir <- asks hashdir
+        liftIO $ renameFile file (hashdir </> V.toList newhash ++ takeExtension file)
+      hashes <- getHashes
+      modify (\state -> state { hashes = hashes })
 
-findFileWithHash :: Config -> Hash -> IO FilePath
-findFileWithHash config@Config{ hashdir } h = do
-  all <- listDirectory hashdir
+findFileWithHash :: (MonadIO m, MonadReader Config m) => Hash -> m FilePath
+findFileWithHash h = do
+  hashdir <- asks hashdir
+  all <- liftIO $ listDirectory hashdir
   maybe (fail $ "Couldn't find hash " ++ chars) return . listToMaybe . map (hashdir </>) . filter ((== chars) .  dropExtensions) $ all
   where chars = V.toList h
+
+importFiles :: (MonadLogger m, MonadReader Config m, MonadIO m, MonadState ImportState m) => m ()
+importFiles = do
+  importdir <- asks importdir
+  skipped <- gets skipped
+  files <- liftIO $ fmap (importdir </>) . listToMaybe . filter (`notElem` skipped) <$> listDirectory importdir
+  maybe (logInfoN "Imported all files") ((*> importFiles) . trans) files
+
 
 main :: IO ()
 main = do
   config <- getConfig
-  putStrLn "initializing"
-  state <- initial config
-  loop config state
+  runStdoutLoggingT $ flip runReaderT config $ do
+    hashes <- getHashes
+    evalStateT importFiles (ImportState hashes [])
 
-loop :: Config -> State -> IO ()
-loop config state = do
-  mnextstate <- trans config state
-  case mnextstate of
-    Nothing        -> return ()
-    Just nextstate -> loop config nextstate
-
-search :: Hash -> [Hash] -> [Hash]
-search hash = map snd . filter ((10 >=) . fst) . sortBy (comparing fst) . map (\h -> (hammingDistance hash h, h))
+search :: MonadState ImportState m => Hash -> m [Hash]
+search hash = gets $ map snd . filter ((10 >=) . fst) . sortBy (comparing fst) . map (\h -> (hammingDistance hash h, h)) . hashes
 
