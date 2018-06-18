@@ -91,10 +91,14 @@ trans file = do
       modify (\state@ImportState { skipped } -> state { skipped = takeFileName file : skipped })
     Just newhash -> do
       results <- search newhash
-      unless (null results) $ do
-        logInfoN $ "Delete the ones you don't want of " <> Text.concat (map (pack . show) results) <> " or the new file " <> pack file <> " (with hash " <> pack (V.toList newhash) <> ")"
-        hashfiles <- mapM findFileWithHash results
-        comparePics $ file : hashfiles
+      unless (null results) $ if newhash `notElem` results
+        then do
+          logInfoN $ "Delete the ones you don't want of " <> Text.concat (map (pack . show) results) <> " or the new file " <> pack file <> " (with hash " <> pack (V.toList newhash) <> ")"
+          hashfiles <- mapM findFileWithHash results
+          comparePics $ file : hashfiles
+        else do
+          logInfoN $ "Removing file " <> pack file <> " as it's already present with hash " <> showT newhash
+          liftIO $ removeFile file
       filethere <- liftIO $ doesFileExist file
       when filethere $ do
         logInfoN $ "Moving file " <> pack file <> " to hashdir with hash " <> pack (show newhash)
