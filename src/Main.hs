@@ -5,6 +5,7 @@
 
 module Main where
 
+import           Control.Exception
 import           Control.Monad.Logger
 import           Control.Monad.Reader
 import           Control.Monad.State
@@ -103,9 +104,17 @@ trans file = do
       when filethere $ do
         logInfoN $ "Moving file " <> pack file <> " to hashdir with hash " <> pack (show newhash)
         hashdir <- asks hashdir
-        liftIO $ renameFile file (hashdir </> V.toList newhash ++ takeExtension file)
+        let target = hashdir </> V.toList newhash ++ takeExtension file
+        liftIO $ catch (renameFile file target) (\e -> do
+                                                    putStrLn $ show (e :: SomeException) ++ "\ncopying instead.."
+                                                    copyFileWithMetadata file target
+                                                    removeFile file
+                                                    )
       hashes <- getHashes
       modify (\state -> state { hashes = hashes })
+
+hand :: SomeException -> IO ()
+hand e = return ()
 
 findFileWithHash :: (MonadIO m, MonadReader Config m) => Hash -> m FilePath
 findFileWithHash h = do
