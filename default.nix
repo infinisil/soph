@@ -24,5 +24,15 @@ let
     inherit src;
   });
 
+  wrapped = pkgs.symlinkJoin {
+    name = "hashsearch";
+    paths = [ hashsearch ];
+    buildInputs = [ pkgs.makeWrapper ];
+    postBuild = ''
+      wrapProgram $out/bin/hashsearch \
+        --prefix PATH : "${makeBinPath [ pkgs.blockhash pkgs.feh ]}"
+    '';
+  };
+
 in
-  hashsearch
+  wrapped
