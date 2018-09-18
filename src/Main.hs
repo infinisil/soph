@@ -10,7 +10,9 @@ import           Control.Monad.Logger
 import           Control.Monad.Reader
 import           Control.Monad.State
 import           Data.Bits
+import qualified Data.ByteString.Lazy as BS
 import           Data.Char
+import           Data.Hashable
 import           Data.List
 import           Data.Maybe
 import           Data.Monoid
@@ -98,6 +100,7 @@ trans file = do
           hashfiles <- mapM findFileWithHash results
           comparePics $ file : hashfiles
         else do
+          --contentHash <- liftIO $ hash <$> BS.readFile file
           logInfoN $ "Removing file " <> pack file <> " as it's already present with hash " <> showT newhash
           liftIO $ removeFile file
       filethere <- liftIO $ doesFileExist file

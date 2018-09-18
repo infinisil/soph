@@ -25,3 +25,5 @@ executable hashsearch
                      , vector
                      , mtl
                      , monad-logger
+                     , hashable
+                     , bytestring
