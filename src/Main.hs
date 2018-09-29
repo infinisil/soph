@@ -67,7 +67,7 @@ getConfig = do
 getHashes :: (MonadIO m, MonadReader Config m) => m [ImageInfo]
 getHashes = do
   hashdir <- asks hashdir
-  hashfiles <- liftIO $ listDirectory hashdir
+  hashfiles <- liftIO $ fmap (hashdir </>) <$> listDirectory hashdir
   let (errors, images) = partitionEithers $ map getHashImageInfo hashfiles
   if null errors then return images
   else error "Got error trying to get hashes"
@@ -91,7 +91,7 @@ doImport new = do
   liftIO $ print importDestination
   liftIO $ copyFileWithMetadata (path new) importDestination
   liftIO $ removeFile (path new)
-  modify (new:)
+  modify (new { path = importDestination } :)
 
 
 importSingle :: (MonadLogger m, MonadIO m, MonadState [ImageInfo] m, MonadReader Config m) => ImageInfo -> m ()
@@ -117,7 +117,7 @@ importFiles ps = forM_ ps $ \p -> do
 
 
 search :: [ImageInfo] -> ImageInfo -> SearchResult
-search images new = mconcat $ map (liftA2 ($) toResult (compareImages 12 new)) images
+search images new = mconcat $ liftA2 ($) toResult (compareImages 12 new) <$> images
   where toResult _ Same      = Present
         toResult img Similar = SimilarPictures (img :| [])
         toResult _ Different = NotPresent
