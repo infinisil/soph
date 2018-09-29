@@ -26,7 +26,7 @@ in
     nativeBuildInputs = drv.nativeBuildInputs or [] ++ [ pkgs.makeWrapper ];
     postInstall = drv.postInstall or "" + ''
       wrapProgram $out/bin/hashsearch \
-        --prefix PATH : "${pkgs.lib.makeBinPath [ pkgs.blockhash pkgs.feh ]}"
+        --prefix PATH : "${pkgs.lib.makeBinPath [ pkgs.feh ]}"
     '';
   });
 
