@@ -48,20 +48,24 @@ data Config = Config
   { importdir :: FilePath
   , hashdir   :: FilePath
   , feh       :: FilePath
+  , dryRun    :: Bool
   } deriving Show
 
 getConfig :: IO Config
 getConfig = do
   args <- getArgs
-  (hashdir, importdir) <- case args of
+  (hashdir, importdir, dry) <- case args of
     [] -> fail "No first argument supplied, should be hash directory"
     [hashdir] -> fail "No second argument supplied, should be import directory"
-    hashdir:importdir:_ -> return (hashdir, importdir)
+    hashdir:importdir:"-n":_ -> return (hashdir, importdir, True)
+    hashdir:importdir:_ -> return (hashdir, importdir, False)
+  when dry $ putStrLn "Dry run"
   feh <- fromMaybe (fail "No feh binary found in PATH") <$> findExecutable "feh"
   return Config
     { importdir = importdir
     , feh = feh
     , hashdir = hashdir
+    , dryRun = dry
     }
 
 getHashes :: (MonadIO m, MonadReader Config m) => m [ImageInfo]
@@ -88,9 +92,10 @@ selectiveImport candidates new = do
 doImport :: (MonadReader Config m, MonadIO m, MonadState [ImageInfo] m) => ImageInfo -> m ()
 doImport new = do
   importDestination <- hashbasedFilename new
-  liftIO $ print importDestination
-  liftIO $ copyFileWithMetadata (path new) importDestination
-  liftIO $ removeFile (path new)
+  dry <- asks dryRun
+  liftIO $ if dry then putStrLn ("Would copy file " ++ path new ++ " to " ++ importDestination) else
+    copyFileWithMetadata (path new) importDestination
+  unless dry $ liftIO $ removeFile (path new)
   modify (new { path = importDestination } :)
 
 
