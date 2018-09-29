@@ -14,7 +14,7 @@ import           Data.ByteArray.Hash  (FnvHash64 (..), fnv1a_64Hash)
 import qualified Data.ByteString      as BS
 import           Data.Char            (isHexDigit)
 import           Data.Either          (partitionEithers)
-import           Data.List            (findIndex)
+import           Data.List            (findIndex, intercalate)
 import           Data.List.NonEmpty   (NonEmpty (..), toList)
 import           Data.Maybe           (fromMaybe)
 import qualified Data.Vector.Unboxed  as V
@@ -70,7 +70,7 @@ getHashes = do
   hashfiles <- liftIO $ fmap (hashdir </>) <$> listDirectory hashdir
   let (errors, images) = partitionEithers $ map getHashImageInfo hashfiles
   if null errors then return images
-  else error "Got error trying to get hashes"
+  else error $ intercalate "\n" errors
 
 comparePics :: (MonadReader Config m, MonadIO m) => [FilePath] -> m ()
 comparePics pics = do
@@ -142,21 +142,22 @@ blockhashLength = blockhashBits ^ 2 `div` 4
 
 getHashImageInfo :: FilePath -> Either String ImageInfo
 getHashImageInfo path = do
-  dashIndex <- maybe (Left $ "Can't get hash image info from dashless basename \"" ++ basename ++ "\"")
+  dashIndex <- maybe reportError
     Right . findIndex (=='-') $ basename
   let (contentString, '-':perceptualString) = splitAt dashIndex basename
 
   contentHash <- if all isHexDigit contentString && length contentString == 16
     then Right . FnvHash64 . fst . head . readHex $ contentString
-    else Left $ "Couldn't decode content hash \"" ++ contentString ++ "\""
+    else reportError
   perceptualHash <- if all isHexDigit perceptualString && length perceptualString == blockhashLength
     then Right . Hash . V.fromList $ perceptualString
-    else Left $ "Couldn't decode perceptual hash \"" ++ perceptualString ++ "\""
+    else reportError
 
 
   return $ ImageInfo path contentHash perceptualHash
   where
     basename = takeBaseName path
+    reportError = Left $ "Error decoding hash from image path " ++ path
 
 getImageInfo :: MonadIO m => FilePath -> m (Either String ImageInfo)
 getImageInfo path = do
