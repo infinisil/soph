@@ -25,3 +25,7 @@ executable hashsearch
                      , vector
                      , mtl
                      , monad-logger
+                     , blockhash
+                     , JuicyPixels
+                     , memory
+                     , bytestring

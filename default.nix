@@ -1,7 +1,7 @@
 let
   nixpkgsSrc = fetchTarball {
-    url = "https://github.com/NixOS/nixpkgs/archive/4b649a99d8461c980e7028a693387dc48033c1f7.tar.gz";
-    sha256 = "0iy2gllj457052wkp20baigb2bnal9nhyai0z9hvjr3x25ngck4y";
+    url = "https://github.com/NixOS/nixpkgs/archive/46651b82b87318e37440c15a639d49ec05e79b79.tar.gz";
+    sha256 = "15wh0b6xn1bp94jfgw1b0s1j23x75c297d3ydz56fsvihlddxzd7";
   };
 
   nixpkgs = (import nixpkgsSrc {}).srcOnly {
@@ -29,4 +29,6 @@ in
         --prefix PATH : "${pkgs.lib.makeBinPath [ pkgs.blockhash pkgs.feh ]}"
     '';
   });
+
+  blockhash = pkgs.haskell.lib.doJailbreak super.blockhash;
 }) // { inherit pkgs; }

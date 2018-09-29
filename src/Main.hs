@@ -2,32 +2,51 @@
 {-# LANGUAGE NamedFieldPuns    #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-
 module Main where
 
-import           Control.Exception
+import qualified Codec.Picture        as P
+import           Control.Applicative  (liftA2)
 import           Control.Monad.Logger
 import           Control.Monad.Reader
 import           Control.Monad.State
-import           Data.Bits
-import           Data.Char
-import           Data.List
-import           Data.Maybe
-import           Data.Monoid
-import           Data.Ord
-import           Data.Text            (Text, pack, unpack)
-import qualified Data.Text            as Text
-import qualified Data.Vector          as V
+import           Data.Blockhash
+import           Data.ByteArray.Hash  (FnvHash64 (..), fnv1a_64Hash)
+import qualified Data.ByteString      as BS
+import           Data.Char            (isHexDigit)
+import           Data.Either          (partitionEithers)
+import           Data.List            (findIndex)
+import           Data.List.NonEmpty   (NonEmpty (..), toList)
+import           Data.Maybe           (fromMaybe)
+import qualified Data.Vector.Unboxed  as V
+import           Numeric              (readHex)
 import           System.Directory
 import           System.Environment
-import           System.Exit
 import           System.FilePath
 import           System.Process.Text
+import           Text.Printf
+
+{-
+TODO:
+- Multiple imports at the same time using STM
+- Copy files to /tmp for comparison with feh
+-}
+
+instance Eq Hash where
+  (Hash l) == (Hash r) = l == r
+
+
+main :: IO ()
+main = do
+  config <- getConfig
+  runStdoutLoggingT $ flip runReaderT config $ do
+    hashes <- getHashes
+    importdir <- asks importdir
+    toimport <- liftIO $ fmap (importdir </>) <$> listDirectory importdir
+    evalStateT (importFiles toimport) hashes
 
 data Config = Config
   { importdir :: FilePath
   , hashdir   :: FilePath
-  , blockhash :: FilePath
   , feh       :: FilePath
   } deriving Show
 
@@ -38,44 +57,20 @@ getConfig = do
     [] -> fail "No first argument supplied, should be hash directory"
     [hashdir] -> fail "No second argument supplied, should be import directory"
     hashdir:importdir:_ -> return (hashdir, importdir)
-  blockhash <- fromMaybe (fail "No hashblock binary found in PATH") <$> findExecutable "blockhash"
   feh <- fromMaybe (fail "No feh binary found in PATH") <$> findExecutable "feh"
   return Config
     { importdir = importdir
-    , blockhash = blockhash
     , feh = feh
     , hashdir = hashdir
     }
 
-showT :: Show a => a -> Text
-showT = pack . show
-
-getHash :: (MonadLogger m, MonadIO m, MonadReader Config m) => FilePath -> m (Maybe Hash)
-getHash file = do
-  blockhash <- asks blockhash
-  (code, stdout, stderr) <- liftIO $ readProcessWithExitCode blockhash [ file ] ""
-  case code of
-    ExitFailure code -> do
-      logErrorN $ "Error code " <> showT code <> " while getting hash of file " <> pack file <> ": " <> stderr <> stdout
-      return Nothing
-    ExitSuccess -> return $ Just . V.fromList . unpack . fst . Text.breakOn " " $ stdout
-
-type Hash = V.Vector Char
-
-hammingDistance :: Hash -> Hash -> Int
-hammingDistance h1 h2 =
-  V.sum $ V.map popCount $ V.zipWith xor (V.map digitToInt h1) (V.map digitToInt h2)
-
-data ImportState = ImportState
-  { hashes  :: [Hash]
-  , skipped :: [FilePath]
-  }
-
-getHashes :: (MonadIO m, MonadReader Config m) => m [Hash]
+getHashes :: (MonadIO m, MonadReader Config m) => m [ImageInfo]
 getHashes = do
   hashdir <- asks hashdir
   hashfiles <- liftIO $ listDirectory hashdir
-  return $ V.fromList . dropExtensions <$> hashfiles
+  let (errors, images) = partitionEithers $ map getHashImageInfo hashfiles
+  if null errors then return images
+  else error "Got error trying to get hashes"
 
 comparePics :: (MonadReader Config m, MonadIO m) => [FilePath] -> m ()
 comparePics pics = do
@@ -83,61 +78,115 @@ comparePics pics = do
   liftIO $ readProcessWithExitCode feh (pics ++ ["-A", "rm %F"]) ""
   return ()
 
-trans :: (MonadLogger m, MonadIO m, MonadState ImportState m, MonadReader Config m) => FilePath -> m ()
-trans file = do
-  mnewhash <- getHash file
-  case mnewhash of
-    Nothing -> do
-      logInfoN $ "Skipping " <> pack file
-      modify (\state@ImportState { skipped } -> state { skipped = takeFileName file : skipped })
-    Just newhash -> do
-      results <- search newhash
-      unless (null results) $ if newhash `notElem` results
-        then do
-          logInfoN $ "Delete the ones you don't want of " <> Text.concat (map (pack . show) results) <> " or the new file " <> pack file <> " (with hash " <> pack (V.toList newhash) <> ")"
-          hashfiles <- mapM findFileWithHash results
-          comparePics $ file : hashfiles
-        else do
-          logInfoN $ "Removing file " <> pack file <> " as it's already present with hash " <> showT newhash
-          liftIO $ removeFile file
-      filethere <- liftIO $ doesFileExist file
-      when filethere $ do
-        logInfoN $ "Moving file " <> pack file <> " to hashdir with hash " <> pack (show newhash)
-        hashdir <- asks hashdir
-        let target = hashdir </> V.toList newhash ++ takeExtension file
-        liftIO $ catch (renameFile file target) (\e -> do
-                                                    putStrLn $ show (e :: SomeException) ++ "\ncopying instead.."
-                                                    copyFileWithMetadata file target
-                                                    removeFile file
-                                                    )
-      hashes <- getHashes
-      modify (\state -> state { hashes = hashes })
+selectiveImport :: (MonadReader Config m, MonadIO m, MonadState [ImageInfo] m) => NonEmpty ImageInfo -> ImageInfo -> m ()
+selectiveImport candidates new = do
+  comparePics (newpath : map path (toList candidates))
+  filethere <- liftIO $ doesFileExist newpath
+  when filethere (doImport new)
+  where newpath = path new
 
-hand :: SomeException -> IO ()
-hand e = return ()
+doImport :: (MonadReader Config m, MonadIO m, MonadState [ImageInfo] m) => ImageInfo -> m ()
+doImport new = do
+  importDestination <- hashbasedFilename new
+  liftIO $ print importDestination
+  liftIO $ copyFileWithMetadata (path new) importDestination
+  liftIO $ removeFile (path new)
+  modify (new:)
 
-findFileWithHash :: (MonadIO m, MonadReader Config m) => Hash -> m FilePath
-findFileWithHash h = do
+
+importSingle :: (MonadLogger m, MonadIO m, MonadState [ImageInfo] m, MonadReader Config m) => ImageInfo -> m ()
+importSingle new = do
+  images <- get
+  case search images new of
+    Present           -> do
+      liftIO $ putStrLn $ "Image already present"
+      liftIO $ removeFile (path new)
+    SimilarPictures infos -> do
+      liftIO $ putStrLn $ "Found similar pictures: " ++ show infos
+      selectiveImport infos new
+    NotPresent        -> do
+      liftIO $ putStrLn "Image not present"
+      doImport new
+
+importFiles :: (MonadLogger m, MonadIO m, MonadState [ImageInfo] m, MonadReader Config m) => [FilePath] -> m ()
+importFiles ps = forM_ ps $ \p -> do
+  minfo <- getImageInfo p
+  case minfo of
+    Left error -> liftIO $ putStrLn error
+    Right info -> importSingle info
+
+
+search :: [ImageInfo] -> ImageInfo -> SearchResult
+search images new = mconcat $ map (liftA2 ($) toResult (compareImages 12 new)) images
+  where toResult _ Same      = Present
+        toResult img Similar = SimilarPictures (img :| [])
+        toResult _ Different = NotPresent
+
+data SearchResult = NotPresent
+                  | SimilarPictures (NonEmpty ImageInfo)
+                  | Present
+
+instance Semigroup SearchResult where
+  Present <> _ = Present
+  _ <> Present = Present
+  NotPresent <> NotPresent = NotPresent
+  NotPresent <> SimilarPictures ys = SimilarPictures ys
+  SimilarPictures xs <> NotPresent = SimilarPictures xs
+  SimilarPictures xs <> SimilarPictures ys = SimilarPictures (xs <> ys)
+
+instance Monoid SearchResult where
+  mempty = NotPresent
+
+blockhashBits = 12
+blockhashLength = blockhashBits ^ 2 `div` 4
+
+getHashImageInfo :: FilePath -> Either String ImageInfo
+getHashImageInfo path = do
+  dashIndex <- maybe (Left $ "Can't get hash image info from dashless basename \"" ++ basename ++ "\"")
+    Right . findIndex (=='-') $ basename
+  let (contentString, '-':perceptualString) = splitAt dashIndex basename
+
+  contentHash <- if all isHexDigit contentString && length contentString == 16
+    then Right . FnvHash64 . fst . head . readHex $ contentString
+    else Left $ "Couldn't decode content hash \"" ++ contentString ++ "\""
+  perceptualHash <- if all isHexDigit perceptualString && length perceptualString == blockhashLength
+    then Right . Hash . V.fromList $ perceptualString
+    else Left $ "Couldn't decode perceptual hash \"" ++ perceptualString ++ "\""
+
+
+  return $ ImageInfo path contentHash perceptualHash
+  where
+    basename = takeBaseName path
+
+getImageInfo :: MonadIO m => FilePath -> m (Either String ImageInfo)
+getImageInfo path = do
+  bytes <- liftIO $ BS.readFile path
+  return $ case P.convertRGBA8 <$> P.decodeImage bytes of
+    Left err -> Left err
+    Right (P.Image width height pixels) -> Right $ ImageInfo
+      path
+      (fnv1a_64Hash bytes)
+      (blockhash (Image width height (V.convert pixels)) blockhashBits Precise)
+
+data ImageInfo = ImageInfo
+  { path           :: FilePath
+  , contentHash    :: FnvHash64
+  , perceptualHash :: Hash
+  } deriving (Show)
+
+hashbasedFilename :: MonadReader Config m => ImageInfo -> m FilePath
+hashbasedFilename ImageInfo { path, perceptualHash, contentHash = FnvHash64 contentHashWord } = do
   hashdir <- asks hashdir
-  all <- liftIO $ listDirectory hashdir
-  maybe (fail $ "Couldn't find hash " ++ chars) return . listToMaybe . map (hashdir </>) . filter ((== chars) .  dropExtensions) $ all
-  where chars = V.toList h
-
-importFiles :: (MonadLogger m, MonadReader Config m, MonadIO m, MonadState ImportState m) => m ()
-importFiles = do
-  importdir <- asks importdir
-  skipped <- gets skipped
-  files <- liftIO $ fmap (importdir </>) . listToMaybe . filter (`notElem` skipped) <$> listDirectory importdir
-  maybe (logInfoN "Imported all files") ((*> importFiles) . trans) files
+  return $ hashdir </> (printf "%016x" contentHashWord ++ "-" ++ show perceptualHash ++ takeExtension path)
 
 
-main :: IO ()
-main = do
-  config <- getConfig
-  runStdoutLoggingT $ flip runReaderT config $ do
-    hashes <- getHashes
-    evalStateT importFiles (ImportState hashes [])
+data ImageDifference = Same -- Same content hash
+                     | Similar -- Similar or same perceptual hash, different content hash
+                     | Different -- Very different perceptual hash, different content hash
+                     deriving (Ord, Eq)
 
-search :: MonadState ImportState m => Hash -> m [Hash]
-search hash = gets $ map snd . filter ((10 >=) . fst) . sortBy (comparing fst) . map (\h -> (hammingDistance hash h, h)) . hashes
-
+compareImages :: Int -> ImageInfo -> ImageInfo -> ImageDifference
+compareImages similarDist left right
+  | contentHash left == contentHash right = Same
+  | perceptualHash left `hammingDistance` perceptualHash right < similarDist = Similar
+  | otherwise = Different
