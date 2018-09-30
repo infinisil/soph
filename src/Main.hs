@@ -1,24 +1,30 @@
-{-# LANGUAGE FlexibleContexts  #-}
-{-# LANGUAGE NamedFieldPuns    #-}
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE DeriveAnyClass     #-}
+{-# LANGUAGE DeriveGeneric      #-}
+{-# LANGUAGE FlexibleContexts   #-}
+{-# LANGUAGE NamedFieldPuns     #-}
+{-# LANGUAGE OverloadedStrings  #-}
+{-# LANGUAGE StandaloneDeriving #-}
 
 module Main where
 
-import qualified Codec.Picture        as P
-import           Control.Applicative  (liftA2)
+import qualified Codec.Picture               as P
+import           Control.Applicative         (liftA2)
 import           Control.Monad.Logger
 import           Control.Monad.Reader
 import           Control.Monad.State
+import           Control.Parallel.Strategies
 import           Data.Blockhash
-import           Data.ByteArray.Hash  (FnvHash64 (..), fnv1a_64Hash)
-import qualified Data.ByteString      as BS
-import           Data.Char            (isHexDigit)
-import           Data.Either          (partitionEithers)
-import           Data.List            (findIndex, intercalate)
-import           Data.List.NonEmpty   (NonEmpty (..), toList)
-import           Data.Maybe           (fromMaybe)
-import qualified Data.Vector.Unboxed  as V
-import           Numeric              (readHex)
+import           Data.ByteArray.Hash         (FnvHash64 (..), fnv1a_64Hash)
+import qualified Data.ByteString             as BS
+import           Data.Char                   (isHexDigit)
+import           Data.Either                 (partitionEithers)
+import           Data.List                   (findIndex, intercalate)
+import           Data.List.NonEmpty          (NonEmpty (..), toList)
+import           Data.Maybe                  (fromMaybe)
+import qualified Data.Vector.Unboxed         as V
+import           GHC.Conc                    (getNumCapabilities)
+import           GHC.Generics
+import           Numeric                     (readHex)
 import           System.Directory
 import           System.Environment
 import           System.FilePath
@@ -29,6 +35,7 @@ import           Text.Printf
 TODO:
 - Multiple imports at the same time using STM
 - Copy files to /tmp for comparison with feh
+- Implement multiple selection strategies
 -}
 
 instance Eq Hash where
@@ -167,18 +174,24 @@ getHashImageInfo path = do
 getImageInfo :: MonadIO m => FilePath -> m (Either String ImageInfo)
 getImageInfo path = do
   bytes <- liftIO $ BS.readFile path
-  return $ case P.convertRGBA8 <$> P.decodeImage bytes of
-    Left err -> Left err
-    Right (P.Image width height pixels) -> Right $ ImageInfo
-      path
-      (fnv1a_64Hash bytes)
-      (blockhash (Image width height (V.convert pixels)) blockhashBits Precise)
+  return $ getImageInfoBytes path bytes
+
+getImageInfoBytes :: FilePath -> BS.ByteString -> Either String ImageInfo
+getImageInfoBytes path bytes = case P.convertRGBA8 <$> P.decodeImage bytes of
+  Left err -> Left err
+  Right (P.Image width height pixels) -> Right $ ImageInfo
+    path
+    (fnv1a_64Hash bytes)
+    (blockhash (Image width height (V.convert pixels)) blockhashBits Precise)
 
 data ImageInfo = ImageInfo
   { path           :: FilePath
   , contentHash    :: FnvHash64
   , perceptualHash :: Hash
-  } deriving (Show)
+  } deriving (Show, Generic, NFData)
+
+deriving instance Generic Hash
+deriving instance NFData Hash
 
 hashbasedFilename :: MonadReader Config m => ImageInfo -> m FilePath
 hashbasedFilename ImageInfo { path, perceptualHash, contentHash = FnvHash64 contentHashWord } = do
