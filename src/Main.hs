@@ -19,7 +19,6 @@ import           Data.List                (findIndex, intercalate)
 import           Data.List.NonEmpty       (NonEmpty (..), toList)
 import           Data.Maybe               (fromMaybe)
 import qualified Data.Vector.Unboxed      as V
-import           Numeric                  (readHex)
 import           System.Directory
 import           System.Environment
 import           System.FilePath
@@ -32,15 +31,14 @@ import           Control.Concurrent.Async (replicateConcurrently_)
 import           Control.Concurrent.STM
 import           Control.Monad
 
+import           Config
+import           Hashing
+
 {-
 TODO:
 - Multiple imports at the same time using STM
 - Copy files to /tmp for comparison with feh
 -}
-
-instance Eq Hash where
-  (Hash l) == (Hash r) = l == r
-
 
 main :: IO ()
 main = do
@@ -86,29 +84,6 @@ worker images queue = do
       liftIO $ threadDelay 1000
       worker images queue
 
-data Config = Config
-  { importdir :: FilePath
-  , hashdir   :: FilePath
-  , feh       :: FilePath
-  , dryRun    :: Bool
-  } deriving Show
-
-getConfig :: IO Config
-getConfig = do
-  args <- getArgs
-  (hashdir, importdir, dry) <- case args of
-    [] -> fail "No first argument supplied, should be hash directory"
-    [hashdir] -> fail "No second argument supplied, should be import directory"
-    hashdir:importdir:"-n":_ -> return (hashdir, importdir, True)
-    hashdir:importdir:_ -> return (hashdir, importdir, False)
-  when dry $ putStrLn "Dry run"
-  feh <- fromMaybe (fail "No feh binary found in PATH") <$> findExecutable "feh"
-  return Config
-    { importdir = importdir
-    , feh = feh
-    , hashdir = hashdir
-    , dryRun = dry
-    }
 
 getHashes :: (MonadIO m, MonadReader Config m) => m [ImageInfo]
 getHashes = do
@@ -167,6 +142,7 @@ importFiles ps = forM_ ps $ \p -> do
     Left error -> liftIO $ putStrLn error
     Right info -> importSingle info
 
+-- TODO: Replace with BKTree (bktrees package)
 
 search :: [ImageInfo] -> ImageInfo -> SearchResult
 search images new = mconcat $ liftA2 ($) toResult (compareImages 12 new) <$> images
@@ -188,50 +164,6 @@ instance Semigroup SearchResult where
 
 instance Monoid SearchResult where
   mempty = NotPresent
-
-blockhashBits = 12
-blockhashLength = blockhashBits ^ 2 `div` 4
-
-getHashImageInfo :: FilePath -> Either String ImageInfo
-getHashImageInfo path = do
-  dashIndex <- maybe reportError
-    Right . findIndex (=='-') $ basename
-  let (contentString, '-':perceptualString) = splitAt dashIndex basename
-
-  contentHash <- if all isHexDigit contentString && length contentString == 16
-    then Right . FnvHash64 . fst . head . readHex $ contentString
-    else reportError
-  perceptualHash <- if all isHexDigit perceptualString && length perceptualString == blockhashLength
-    then Right . Hash . V.fromList $ perceptualString
-    else reportError
-
-
-  return $ ImageInfo path contentHash perceptualHash
-  where
-    basename = takeBaseName path
-    reportError = Left $ "Error decoding hash from image path " ++ path
-
-getImageInfo :: MonadIO m => FilePath -> m (Either String ImageInfo)
-getImageInfo path = do
-  bytes <- liftIO $ BS.readFile path
-  return $ case P.convertRGBA8 <$> P.decodeImage bytes of
-    Left err -> Left err
-    Right (P.Image width height pixels) -> Right $ ImageInfo
-      path
-      (fnv1a_64Hash bytes)
-      (blockhash (Image width height (V.convert pixels)) blockhashBits Precise)
-
-data ImageInfo = ImageInfo
-  { path           :: FilePath
-  , contentHash    :: FnvHash64
-  , perceptualHash :: Hash
-  } deriving (Show)
-
-hashbasedFilename :: MonadReader Config m => ImageInfo -> m FilePath
-hashbasedFilename ImageInfo { path, perceptualHash, contentHash = FnvHash64 contentHashWord } = do
-  hashdir <- asks hashdir
-  return $ hashdir </> (printf "%016x" contentHashWord ++ "-" ++ show perceptualHash ++ takeExtension path)
-
 
 data ImageDifference = Same -- Same content hash
                      | Similar -- Similar or same perceptual hash, different content hash
