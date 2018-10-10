@@ -1,29 +1,36 @@
+{-# LANGUAGE DeriveGeneric     #-}
 {-# LANGUAGE FlexibleContexts  #-}
 {-# LANGUAGE NamedFieldPuns    #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module Main where
 
-import qualified Codec.Picture        as P
-import           Control.Applicative  (liftA2)
+import qualified Codec.Picture            as P
+import           Control.Applicative      (liftA2)
 import           Control.Monad.Logger
 import           Control.Monad.Reader
 import           Control.Monad.State
 import           Data.Blockhash
-import           Data.ByteArray.Hash  (FnvHash64 (..), fnv1a_64Hash)
-import qualified Data.ByteString      as BS
-import           Data.Char            (isHexDigit)
-import           Data.Either          (partitionEithers)
-import           Data.List            (findIndex, intercalate)
-import           Data.List.NonEmpty   (NonEmpty (..), toList)
-import           Data.Maybe           (fromMaybe)
-import qualified Data.Vector.Unboxed  as V
-import           Numeric              (readHex)
+import           Data.ByteArray.Hash      (FnvHash64 (..), fnv1a_64Hash)
+import qualified Data.ByteString          as BS
+import           Data.Char                (isHexDigit)
+import           Data.Either              (partitionEithers)
+import           Data.List                (findIndex, intercalate)
+import           Data.List.NonEmpty       (NonEmpty (..), toList)
+import           Data.Maybe               (fromMaybe)
+import qualified Data.Vector.Unboxed      as V
+import           Numeric                  (readHex)
 import           System.Directory
 import           System.Environment
 import           System.FilePath
 import           System.Process.Text
 import           Text.Printf
+
+import           Control.Concurrent       (ThreadId, forkIO, getNumCapabilities,
+                                           threadDelay)
+import           Control.Concurrent.Async (replicateConcurrently_)
+import           Control.Concurrent.STM
+import           Control.Monad
 
 {-
 TODO:
@@ -40,9 +47,44 @@ main = do
   config <- getConfig
   runStdoutLoggingT $ flip runReaderT config $ do
     hashes <- getHashes
+    hashesVar <- liftIO $ newTVarIO hashes
     importdir <- asks importdir
-    toimport <- liftIO $ fmap (importdir </>) <$> listDirectory importdir
-    evalStateT (importFiles toimport) hashes
+    queue <- initWorkQueue
+    spawnWorkers hashesVar queue
+    liftIO $ putStrLn "Done"
+    --evalStateT (importFiles toimport) hashes
+    return ()
+
+type WorkItem = FilePath
+type WorkQueue = TQueue WorkItem
+
+type Images = TVar [ImageInfo]
+
+initWorkQueue :: (MonadIO m, MonadReader Config m) => m WorkQueue
+initWorkQueue = do
+  importdir <- asks importdir
+  toimport <- liftIO $ fmap (importdir </>) <$> listDirectory importdir
+  liftIO $ atomically $ do
+    queue <- newTQueue
+    forM_ toimport (writeTQueue queue)
+    return queue
+
+spawnWorkers :: (MonadReader Config m, MonadIO m) => Images -> WorkQueue -> m ()
+spawnWorkers images queue = do
+  caps <- liftIO getNumCapabilities
+  liftIO $ putStrLn $ "Starting " ++ show caps ++ " threads"
+  config <- ask
+  liftIO $ replicateConcurrently_ caps (runReaderT (worker images queue) config)
+
+worker :: (MonadIO m, MonadReader Config m) => Images -> WorkQueue -> m ()
+worker images queue = do
+  mitem <- liftIO $ atomically $ tryReadTQueue queue
+  case mitem of
+    Nothing -> return ()
+    Just item -> do
+      liftIO $ putStrLn $ "Handling item " ++ item
+      liftIO $ threadDelay 1000
+      worker images queue
 
 data Config = Config
   { importdir :: FilePath

@@ -17,6 +17,7 @@ executable hashsearch
   hs-source-dirs:      src
   main-is:             Main.hs
   default-language:    Haskell2010
+  ghc-options:         -threaded -with-rtsopts=-N
   build-depends:       base >= 4.7 && < 5
                      , process-extras
                      , text
@@ -29,3 +30,5 @@ executable hashsearch
                      , JuicyPixels
                      , memory
                      , bytestring
+                     , stm
+                     , async
