@@ -121,8 +121,13 @@ getHashes = do
 comparePics :: (MonadReader Config m, MonadIO m) => [FilePath] -> m ()
 comparePics pics = do
   feh <- asks feh
-  liftIO $ readProcessWithExitCode feh (pics ++ ["-A", "rm %F"]) ""
-  return ()
+  let args = pics ++ ["-A", "rm %F"]
+  dry <- asks dryRun
+  liftIO $ if dry then
+    putStrLn $ "Would start feh with arguments " ++ unwords args
+  else do
+    readProcessWithExitCode feh args ""
+    return ()
 
 selectiveImport :: (MonadReader Config m, MonadIO m, MonadState [ImageInfo] m) => NonEmpty ImageInfo -> ImageInfo -> m ()
 selectiveImport candidates new = do
