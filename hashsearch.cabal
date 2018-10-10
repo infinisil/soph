@@ -1,14 +1,14 @@
 name:                hashsearch
 version:             0.1.0.0
--- synopsis:
+synopsis:            Efficiently deduplicate image collections
 -- description:
-homepage:            https://github.com/githubuser/hashsearch#readme
+homepage:            https://github.com/infinisil/hashsearch#readme
 license:             BSD3
 license-file:        LICENSE
-author:              Author name here
-maintainer:          example@example.com
-copyright:           2018 Author name here
-category:            Web
+author:              Silvan Mosberger
+maintainer:          infinisil@icloud.com
+copyright:           2018 Silvan Mosberger
+category:            Data
 build-type:          Simple
 cabal-version:       >=1.10
 extra-source-files:  README.md
