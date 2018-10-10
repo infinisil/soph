@@ -48,14 +48,37 @@ main = do
     hashesVar <- liftIO $ newTVarIO hashes
     importdir <- asks importdir
     queue <- initWorkQueue
-    spawnWorkers hashesVar queue
+    similarQueue <- liftIO newTQueueIO
+    spawnWorkers hashesVar queue similarQueue
     liftIO $ putStrLn "Done"
+    handleSimilars hashesVar similarQueue
     --evalStateT (importFiles toimport) hashes
     return ()
+
+handleSimilars :: (MonadReader Config m, MonadIO m) => Images -> TQueue ImageInfo -> m ()
+handleSimilars images queue = do
+  items <- liftIO $ atomically $ allQueueItems queue
+  config <- ask
+  forM_ items $ \item -> do
+    dry <- asks dryRun
+    importDestination <- if dry then return (path item) else hashbasedFilename item
+    importSingle (\infos -> do
+        atomically $ modifyTVar images (item { path = importDestination }:)
+        runReaderT (selectiveImport infos item) config)
+      images item
+    return ()
+
+allQueueItems :: TQueue a -> STM [a]
+allQueueItems queue = do
+  value <- tryReadTQueue queue
+  case value of
+    Nothing   -> return []
+    Just item -> (item:) <$> allQueueItems queue
 
 type WorkItem = FilePath
 type WorkQueue = TQueue WorkItem
 
+type SimilarQueue = TQueue ImageInfo
 type Images = TVar [ImageInfo]
 
 initWorkQueue :: (MonadIO m, MonadReader Config m) => m WorkQueue
@@ -67,22 +90,25 @@ initWorkQueue = do
     forM_ toimport (writeTQueue queue)
     return queue
 
-spawnWorkers :: (MonadReader Config m, MonadIO m) => Images -> WorkQueue -> m ()
-spawnWorkers images queue = do
+spawnWorkers :: (MonadReader Config m, MonadIO m) => Images -> WorkQueue -> SimilarQueue -> m ()
+spawnWorkers images queue similar = do
   caps <- liftIO getNumCapabilities
   liftIO $ putStrLn $ "Starting " ++ show caps ++ " threads"
   config <- ask
-  liftIO $ replicateConcurrently_ caps (runReaderT (worker images queue) config)
+  liftIO $ replicateConcurrently_ caps (runReaderT (worker images queue similar ) config)
 
-worker :: (MonadIO m, MonadReader Config m) => Images -> WorkQueue -> m ()
-worker images queue = do
+worker :: (MonadIO m, MonadReader Config m) => Images -> WorkQueue -> SimilarQueue -> m ()
+worker images queue similar = do
   mitem <- liftIO $ atomically $ tryReadTQueue queue
   case mitem of
     Nothing -> return ()
     Just item -> do
       liftIO $ putStrLn $ "Handling item " ++ item
-      liftIO $ threadDelay 1000
-      worker images queue
+      minfo <- getImageInfo item
+      case minfo of
+        Left error -> liftIO $ putStrLn error
+        Right info -> importSingle (\_ -> atomically $ writeTQueue similar info) images info
+      worker images queue similar
 
 
 getHashes :: (MonadIO m, MonadReader Config m) => m [ImageInfo]
@@ -98,49 +124,51 @@ comparePics pics = do
   feh <- asks feh
   let args = pics ++ ["-A", "rm %F"]
   dry <- asks dryRun
-  liftIO $ if dry then
+  liftIO $ putStrLn $ "Would start feh with arguments " ++ unwords args
+  liftIO $ if dry then do
     putStrLn $ "Would start feh with arguments " ++ unwords args
+    return ()
   else do
     readProcessWithExitCode feh args ""
     return ()
 
-selectiveImport :: (MonadReader Config m, MonadIO m, MonadState [ImageInfo] m) => NonEmpty ImageInfo -> ImageInfo -> m ()
+selectiveImport :: (MonadReader Config m, MonadIO m) => NonEmpty ImageInfo -> ImageInfo -> m ()
 selectiveImport candidates new = do
   comparePics (newpath : map path (toList candidates))
   filethere <- liftIO $ doesFileExist newpath
   when filethere (doImport new)
   where newpath = path new
 
-doImport :: (MonadReader Config m, MonadIO m, MonadState [ImageInfo] m) => ImageInfo -> m ()
+doImport :: (MonadReader Config m, MonadIO m) => ImageInfo -> m ()
 doImport new = do
   importDestination <- hashbasedFilename new
   dry <- asks dryRun
-  liftIO $ if dry then putStrLn ("Would copy file " ++ path new ++ " to " ++ importDestination) else
-    copyFileWithMetadata (path new) importDestination
+  newItem <- if dry then do
+    liftIO $ putStrLn ("Would copy file " ++ path new ++ " to " ++ importDestination)
+    return new
+  else do
+    liftIO $ copyFileWithMetadata (path new) importDestination
+    return new { path = importDestination }
   unless dry $ liftIO $ removeFile (path new)
-  modify (new { path = importDestination } :)
 
 
-importSingle :: (MonadLogger m, MonadIO m, MonadState [ImageInfo] m, MonadReader Config m) => ImageInfo -> m ()
-importSingle new = do
-  images <- get
-  case search images new of
-    Present           -> do
-      liftIO $ putStrLn $ "Image already present"
-      liftIO $ removeFile (path new)
-    SimilarPictures infos -> do
-      liftIO $ putStrLn $ "Found similar pictures: " ++ show infos
-      selectiveImport infos new
-    NotPresent        -> do
-      liftIO $ putStrLn "Image not present"
-      doImport new
-
-importFiles :: (MonadLogger m, MonadIO m, MonadState [ImageInfo] m, MonadReader Config m) => [FilePath] -> m ()
-importFiles ps = forM_ ps $ \p -> do
-  minfo <- getImageInfo p
-  case minfo of
-    Left error -> liftIO $ putStrLn error
-    Right info -> importSingle info
+importSingle :: (MonadIO m, MonadReader Config m) => (NonEmpty ImageInfo -> IO ()) -> Images -> ImageInfo -> m ()
+importSingle simhandle imagesv new = do
+  action <- liftIO $ atomically $ do
+    images <- readTVar imagesv
+    case search images new of
+      Present -> return $ do
+        liftIO $ putStrLn $ "Image already present"
+        liftIO $ removeFile (path new)
+      SimilarPictures infos -> return $ do
+        liftIO $ putStrLn $ "Found similar pictures: " ++ show infos
+        liftIO $ simhandle infos
+      NotPresent -> do
+        writeTVar imagesv (new:images)
+        return $ do
+          liftIO $ putStrLn "Image not present"
+          doImport new
+  action
 
 -- TODO: Replace with BKTree (bktrees package)
 
