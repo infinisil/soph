@@ -1,5 +1,6 @@
 module Config where
 
+import           Control.Concurrent (getNumCapabilities)
 import           Control.Monad      (when)
 import           Data.Maybe         (fromMaybe)
 import           System.Directory   (findExecutable)
@@ -10,6 +11,7 @@ data Config = Config
   , hashdir   :: FilePath
   , feh       :: FilePath
   , dryRun    :: Bool
+  , caps      :: Int
   } deriving Show
 
 getConfig :: IO Config
@@ -22,9 +24,11 @@ getConfig = do
     hashdir:importdir:_ -> return (hashdir, importdir, False)
   when dry $ putStrLn "Dry run"
   feh <- fromMaybe (fail "No feh binary found in PATH") <$> findExecutable "feh"
+  caps <- getNumCapabilities
   return Config
     { importdir = importdir
     , feh = feh
     , hashdir = hashdir
     , dryRun = dry
+    , caps = caps
     }

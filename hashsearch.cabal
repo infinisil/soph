@@ -22,7 +22,6 @@ executable hashsearch
   ghc-options:         -threaded -with-rtsopts=-N
   build-depends:       base >= 4.7 && < 5
                      , process-extras
-                     , text
                      , directory
                      , filepath
                      , vector
@@ -32,5 +31,5 @@ executable hashsearch
                      , JuicyPixels
                      , memory
                      , bytestring
-                     , stm
-                     , async
+                     , conduit
+                     , broadcast-chan-conduit
