@@ -1,7 +1,6 @@
 with import ./. {};
 
 shellFor {
-  packages = p: with p; [ hashsearch ];
-  withHoogle = true;
+  packages = p: [ hashsearch ];
   nativeBuildInputs = [ cabal-install ];
 }
