@@ -19,7 +19,9 @@ in
 { pkgs ? import nixpkgs {}
 }:
 
-(pkgs.haskellPackages.extend (pkgs.haskell.lib.packageSourceOverrides {
+with pkgs.haskell.lib;
+
+(pkgs.haskellPackages.extend (packageSourceOverrides {
   hashsearch = ./.;
 })).extend (self: super: {
   hashsearch = super.hashsearch.overrideAttrs (drv: {
@@ -30,5 +32,11 @@ in
     '';
   });
 
-  blockhash = pkgs.haskell.lib.doJailbreak super.blockhash;
+  blockhash = doJailbreak super.blockhash;
+
+  tasty-travis = doJailbreak super.tasty-travis;
+
+  broadcast-chan = self.callHackage "broadcast-chan" "0.2.0.1" {};
+
+  broadcast-chan-tests = addBuildDepend super.broadcast-chan-tests self.broadcast-chan;
 }) // { inherit pkgs; }
