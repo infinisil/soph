@@ -12,12 +12,11 @@ import qualified Data.ByteString      as BS
 import           Data.Char            (isHexDigit)
 import           Data.List            (elemIndex)
 import           Data.List.NonEmpty   (NonEmpty (..), toList)
+import qualified Data.Set.BKTree      as BK
 import qualified Data.Vector.Unboxed  as V
 import           Numeric              (readHex)
 import           System.FilePath
 import           Text.Printf          (printf)
-
-import qualified Data.Set.BKTree      as BK
 
 import           Config
 
@@ -64,13 +63,12 @@ data ImageInfo = ImageInfo
   , perceptualHash :: Hash
   } deriving (Show, Eq)
 
+-- TODO: Base64 encoding?
 hashbasedFilename :: MonadReader Config m => ImageInfo -> m FilePath
 hashbasedFilename ImageInfo { extension, perceptualHash, contentHash = FnvHash64 contentHashWord } = do
   hashdir <- asks hashdir
   return $ hashdir </> (printf "%016x" contentHashWord ++ "-" ++ show perceptualHash ++ extension)
 
-
--- TODO: Replace with BKTree (bktrees package)
 
 search :: BK.BKTree ImageInfo -> ImageInfo -> SearchResult
 search database query
@@ -83,30 +81,7 @@ data SearchResult = NotPresent
                   | SimilarPictures (NonEmpty ImageInfo)
                   | Present
 
-instance Semigroup SearchResult where
-  Present <> _ = Present
-  _ <> Present = Present
-  NotPresent <> NotPresent = NotPresent
-  NotPresent <> SimilarPictures ys = SimilarPictures ys
-  SimilarPictures xs <> NotPresent = SimilarPictures xs
-  SimilarPictures xs <> SimilarPictures ys = SimilarPictures (xs <> ys)
-
-instance Monoid SearchResult where
-  mempty = NotPresent
-
-data ImageDifference = Same -- Same content hash
-                     | Similar -- Similar or same perceptual hash, different content hash
-                     | Different -- Very different perceptual hash, different content hash
-                     deriving (Ord, Eq)
-
 -- TODO: Does this satisfy all metric properties?
 instance BK.Metric ImageInfo where
   distance left right = if contentHash left == contentHash right then 0
     else 1 + (perceptualHash left `hammingDistance` perceptualHash right)
-
-
-compareImages :: Int -> ImageInfo -> ImageInfo -> ImageDifference
-compareImages similarDist left right
-  | contentHash left == contentHash right = Same
-  | perceptualHash left `hammingDistance` perceptualHash right < similarDist = Similar
-  | otherwise = Different
