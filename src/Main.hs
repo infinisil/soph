@@ -20,6 +20,7 @@ import           Data.Conduit.List        (sourceList)
 import           Data.Either              (partitionEithers)
 import           Data.List                (findIndex, intercalate)
 import           Data.List.NonEmpty       (NonEmpty (..), toList)
+import qualified Data.Set.BKTree          as BK
 import           System.Directory
 import           System.FilePath
 import           System.Process.Text      (readProcessWithExitCode)
@@ -36,7 +37,7 @@ import of a single file goes through the states:
 
 type Yielding = (FilePath, ImageInfo)
 
-readFiles :: (MonadReader Config m, MonadResource m, MonadUnliftIO m) => [ImageInfo] -> Config -> ConduitT i o m ([ImageInfo], [Yielding])
+readFiles :: (MonadReader Config m, MonadResource m, MonadUnliftIO m) => BK.BKTree ImageInfo -> Config -> ConduitT i o m (BK.BKTree ImageInfo, [Yielding])
 readFiles images Config { caps, importdir } =
   C.sourceDirectoryDeep True importdir
   .| C.mapM (\path -> (path,) <$> liftIO (BS.readFile path))
@@ -64,7 +65,7 @@ ins images action = await >>= \case
     NotPresent -> do
       log "New image, importing it"
       doImport (path, new)
-      ins (new:images) action
+      ins (BK.insert new images) action
     where
       log :: MonadIO m => String -> m ()
       log str = liftIO $ putStrLn $ "While testing " ++ path ++ ": " ++ str
@@ -75,17 +76,16 @@ main = do
   flip runReaderT config $ do
     hashes <- getHashes
     (res, similar) <- runConduitRes (readFiles hashes config)
-    x <- runConduit (sourceList similar .| ins res selectiveImport)
-    liftIO $ print x
+    runConduit (sourceList similar .| ins res selectiveImport)
     return ()
 
 
-getHashes :: (MonadIO m, MonadReader Config m) => m [ImageInfo]
+getHashes :: (MonadIO m, MonadReader Config m) => m (BK.BKTree ImageInfo)
 getHashes = do
   hashdir <- asks hashdir
   hashfiles <- liftIO $ fmap (hashdir </>) <$> listDirectory hashdir
   let (errors, images) = partitionEithers $ map getHashImageInfo hashfiles
-  if null errors then return images
+  if null errors then return $ BK.fromList images
   else error $ intercalate "\n" errors
 
 comparePics :: (MonadReader Config m, MonadIO m) => [FilePath] -> m ()

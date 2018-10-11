@@ -17,6 +17,8 @@ import           Numeric              (readHex)
 import           System.FilePath
 import           Text.Printf          (printf)
 
+import qualified Data.Set.BKTree      as BK
+
 import           Config
 
 instance Eq Hash where
@@ -60,7 +62,7 @@ data ImageInfo = ImageInfo
   { extension      :: String
   , contentHash    :: FnvHash64
   , perceptualHash :: Hash
-  } deriving (Show)
+  } deriving (Show, Eq)
 
 hashbasedFilename :: MonadReader Config m => ImageInfo -> m FilePath
 hashbasedFilename ImageInfo { extension, perceptualHash, contentHash = FnvHash64 contentHashWord } = do
@@ -70,11 +72,12 @@ hashbasedFilename ImageInfo { extension, perceptualHash, contentHash = FnvHash64
 
 -- TODO: Replace with BKTree (bktrees package)
 
-search :: [ImageInfo] -> ImageInfo -> SearchResult
-search images new = mconcat $ liftA2 ($) toResult (compareImages 12 new) <$> images
-  where toResult _ Same      = Present
-        toResult img Similar = SimilarPictures (img :| [])
-        toResult _ Different = NotPresent
+search :: BK.BKTree ImageInfo -> ImageInfo -> SearchResult
+search database query
+  | BK.member query database = Present
+  | otherwise = case BK.elemsDistance 10 query database of
+    []     -> NotPresent
+    (x:xs) -> SimilarPictures (x :| xs)
 
 data SearchResult = NotPresent
                   | SimilarPictures (NonEmpty ImageInfo)
@@ -95,6 +98,12 @@ data ImageDifference = Same -- Same content hash
                      | Similar -- Similar or same perceptual hash, different content hash
                      | Different -- Very different perceptual hash, different content hash
                      deriving (Ord, Eq)
+
+-- TODO: Does this satisfy all metric properties?
+instance BK.Metric ImageInfo where
+  distance left right = if contentHash left == contentHash right then 0
+    else 1 + (perceptualHash left `hammingDistance` perceptualHash right)
+
 
 compareImages :: Int -> ImageInfo -> ImageInfo -> ImageDifference
 compareImages similarDist left right

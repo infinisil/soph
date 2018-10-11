@@ -33,3 +33,4 @@ executable hashsearch
                      , bytestring
                      , conduit
                      , broadcast-chan-conduit
+                     , bktrees
