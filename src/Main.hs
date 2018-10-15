@@ -107,5 +107,6 @@ doImport :: (MonadReader Config m, MonadIO m) => (FilePath, ImageInfo) -> m ()
 doImport (path, new) = do
   importDestination <- hashbasedFilename new
   liftIO $ copyFileWithMetadata path importDestination
+  liftIO $ removeFile path
 
 
