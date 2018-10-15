@@ -34,3 +34,4 @@ executable hashsearch
                      , conduit
                      , broadcast-chan-conduit
                      , bktrees
+                     , optparse-applicative

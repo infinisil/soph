@@ -92,14 +92,9 @@ comparePics :: (MonadReader Config m, MonadIO m) => [FilePath] -> m ()
 comparePics pics = do
   feh <- asks feh
   let args = pics ++ ["-A", "rm %F", "-g640x480", "-Z", "-.", "-Bblack"]
-  dry <- asks dryRun
-  liftIO $ putStrLn $ "Would start feh with arguments " ++ unwords args
-  liftIO $ if dry then do
-    putStrLn $ "Would start feh with arguments " ++ unwords args
-    return ()
-  else do
-    readProcessWithExitCode feh args ""
-    return ()
+  liftIO $ putStrLn $ "Starting feh with arguments " ++ unwords args
+  liftIO $ readProcessWithExitCode feh args ""
+  return ()
 
 selectiveImport :: (MonadReader Config m, MonadIO m) => NonEmpty ImageInfo -> (FilePath, ImageInfo) -> m ()
 selectiveImport candidates (path, new) = do
@@ -111,13 +106,6 @@ selectiveImport candidates (path, new) = do
 doImport :: (MonadReader Config m, MonadIO m) => (FilePath, ImageInfo) -> m ()
 doImport (path, new) = do
   importDestination <- hashbasedFilename new
-  dry <- asks dryRun
-  newItem <- if dry then do
-    liftIO $ putStrLn ("Would copy file " ++ path ++ " to " ++ importDestination)
-    return new
-  else do
-    liftIO $ copyFileWithMetadata path importDestination
-    return new
-  unless dry $ liftIO $ removeFile path
+  liftIO $ copyFileWithMetadata path importDestination
 
 

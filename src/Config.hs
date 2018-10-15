@@ -1,34 +1,57 @@
+{-# LANGUAGE NamedFieldPuns #-}
+
 module Config where
 
-import           Control.Concurrent (getNumCapabilities)
-import           Control.Monad      (when)
-import           Data.Maybe         (fromMaybe)
-import           System.Directory   (findExecutable)
-import           System.Environment (getArgs)
+import           Control.Concurrent  (getNumCapabilities)
+import           Control.Monad       (when)
+import           Data.Maybe          (fromMaybe)
+import           System.Directory    (findExecutable)
+import           System.Environment  (getArgs)
+
+import           Options.Applicative
 
 data Config = Config
   { importdir :: FilePath
   , hashdir   :: FilePath
   , feh       :: FilePath
-  , dryRun    :: Bool
   , caps      :: Int
   } deriving Show
 
+data Options = Options
+  { _importdir :: FilePath
+  , _hashdir   :: FilePath
+  , _verbose   :: Bool
+  }
+
+parser :: Parser Options
+parser = Options
+  <$> argument str
+      ( metavar "SOURCE"
+     <> help "Directory to import from" )
+  <*> argument str
+      ( metavar "TARGET"
+     <> help "Directory to import to" )
+  <*> switch
+      ( long "verbose"
+     <> short 'v'
+     <> help "Enable verbose output"
+      )
+
+opts :: ParserInfo Options
+opts = info (parser <**> helper)
+   ( fullDesc
+  <> progDesc "Import files"
+  <> header "hashsearch - import directories"
+   )
+
 getConfig :: IO Config
 getConfig = do
-  args <- getArgs
-  (hashdir, importdir, dry) <- case args of
-    [] -> fail "No first argument supplied, should be hash directory"
-    [hashdir] -> fail "No second argument supplied, should be import directory"
-    hashdir:importdir:"-n":_ -> return (hashdir, importdir, True)
-    hashdir:importdir:_ -> return (hashdir, importdir, False)
-  when dry $ putStrLn "Dry run"
+  Options { _importdir, _hashdir } <- execParser opts
   feh <- fromMaybe (fail "No feh binary found in PATH") <$> findExecutable "feh"
   caps <- getNumCapabilities
   return Config
-    { importdir = importdir
+    { importdir = _importdir
     , feh = feh
-    , hashdir = hashdir
-    , dryRun = dry
+    , hashdir = _hashdir
     , caps = caps
     }
