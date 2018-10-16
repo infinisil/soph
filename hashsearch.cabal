@@ -19,6 +19,7 @@ executable hashsearch
   default-language:    Haskell2010
   other-modules:       Hashing
                        Config
+                       Log
   ghc-options:         -threaded -with-rtsopts=-N
   build-depends:       base >= 4.7 && < 5
                      , process-extras
@@ -35,3 +36,6 @@ executable hashsearch
                      , broadcast-chan-conduit
                      , bktrees
                      , optparse-applicative
+                     , async
+                     , stm-chans
+                     , stm
