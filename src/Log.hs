@@ -6,15 +6,16 @@ module Log ( withLogs
 import           Control.Concurrent.Async
 import           Control.Concurrent.STM
 import           Control.Concurrent.STM.TMQueue
-import           Control.Monad.IO.Class         (MonadIO, liftIO)
+import           Control.Monad.IO.Class         (MonadIO)
 import           Control.Monad.Logger
+import           Control.Monad.Trans            (lift)
 
 type LogQueue = TMQueue (Loc, LogSource, LogLevel, LogStr)
 
 -- | Run logging until the channel is closed and empty
-unQueueLogT :: (MonadLogger m, MonadIO m) => LogQueue -> m ()
+unQueueLogT :: LogQueue -> LoggingT IO ()
 unQueueLogT chan = do
-  item <- liftIO $ atomically $ readTMQueue chan
+  item <- lift $ atomically $ readTMQueue chan
   case item of
     Nothing -> return ()
     Just (loc, src, lvl, msg) -> do
