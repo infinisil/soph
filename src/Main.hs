@@ -53,7 +53,7 @@ readFiles images Config { caps, options } = do
                 return (path, bytes)
             )
   .| parMapM (Simple Drop) caps imageInfoIO
-  .| importer images (const yield)
+  .| importer images (\info y -> yield y *> return False)
     `fuseBoth`
   C.sinkList
   where
@@ -70,7 +70,7 @@ readFiles images Config { caps, options } = do
           liftIO $ (path,) <$> (evaluate . seq (contentHash info) . seq (perceptualHash info) $ info)
 
 
-importer :: (MonadIO m, MonadReader Config m, MonadLogger m) => BK.BKTree ImageInfo -> (NonEmpty ImageInfo -> Yielding -> ConduitT Yielding o m a) -> ConduitT Yielding o m (BK.BKTree ImageInfo)
+importer :: (MonadIO m, MonadReader Config m, MonadLogger m) => BK.BKTree ImageInfo -> (NonEmpty ImageInfo -> Yielding -> ConduitT Yielding o m Bool) -> ConduitT Yielding o m (BK.BKTree ImageInfo)
 importer images action = await >>= \case
   Nothing -> do
     logDebugNS "process" "Done processing new images"
@@ -82,9 +82,9 @@ importer images action = await >>= \case
       importer images action
     SimilarPictures infos -> do
       logAction $ Text.pack (show (length infos)) <> " similar image(s) found"
-      action infos (path, new)
+      importit <- action infos (path, new)
       -- FIXME: when action does importing, it should insert the new one into the tree
-      importer images action
+      importer (if importit then BK.insert new images else images) action
     NotPresent -> do
       logAction $ "New image, importing it as " <> Text.pack (show new)
       doImport (path, new)
@@ -130,7 +130,7 @@ comparePics pics = do
   liftIO $ readProcessWithExitCode feh args ""
   return ()
 
-selectiveImport :: (MonadLogger m, MonadReader Config m, MonadIO m) => NonEmpty ImageInfo -> (FilePath, ImageInfo) -> m ()
+selectiveImport :: (MonadLogger m, MonadReader Config m, MonadIO m) => NonEmpty ImageInfo -> (FilePath, ImageInfo) -> m Bool
 selectiveImport candidates (path, new) = do
   paths <- forM (toList candidates) hashbasedFilename
   logInfoNS "similar" $ "File " <> Text.pack path <> " to import has " <> Text.pack (show (length paths)) <> " similar images: "
@@ -141,7 +141,10 @@ selectiveImport candidates (path, new) = do
   if filethere then do
     logDebugNS "similar" $ "Path " <> Text.pack path <> " was not deleted, importing it"
     doImport (path, new)
-  else logDebugNS "similar" $ "Path " <> Text.pack path <> " was deleted, not importing"
+    return True
+  else do
+    logDebugNS "similar" $ "Path " <> Text.pack path <> " was deleted, not importing"
+    return False
 
 doImport :: (MonadLogger m, MonadReader Config m, MonadIO m) => (FilePath, ImageInfo) -> m ()
 doImport (path, new) = do
