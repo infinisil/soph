@@ -94,9 +94,9 @@ importer images action = await >>= \case
 
 
 main :: IO ()
-main = withLogs $ \queue -> do
+main = do
   config <- getConfig
-  runQueueLoggingT queue $ flip runReaderT config $ do
+  withLogs (logFilter config) $ \queue -> runQueueLoggingT queue $ flip runReaderT config $ do
     hashes <- getHashes
     (res, similar) <- runConduitRes (readFiles hashes config)
     logInfoNS "similars" $ "Processing " <> Text.pack (show (length similar)) <> " similar images"

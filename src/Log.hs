@@ -21,14 +21,17 @@ unQueueLogT chan = do
       monadLoggerLog loc src lvl msg
       unQueueLogT chan
 
-withLogs :: (LogQueue -> IO b) -> IO b
-withLogs main = do
+withLogs :: (LogLevel -> Bool) -> (LogQueue -> IO b) -> IO b
+withLogs logFilter main = do
   queue <- newTMQueueIO
-  withAsync (runStderrLoggingT $ unQueueLogT queue) $ \asyn -> do
+  withAsync (unLog queue) $ \asyn -> do
     result <- main queue
     atomically $ closeTMQueue queue
     wait asyn
     return result
+  where unLog queue = runStderrLoggingT
+          $ filterLogger (const logFilter)
+          $ unQueueLogT queue
 
 runQueueLoggingT :: MonadIO m => LogQueue -> LoggingT m a -> m a
 runQueueLoggingT queue = (`runLoggingT` sink)

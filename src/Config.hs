@@ -1,15 +1,17 @@
 module Config where
 
-import           Data.Maybe          (fromMaybe)
-import           System.Directory    (findExecutable)
+import           Data.Maybe           (fromMaybe)
+import           System.Directory     (findExecutable)
 
-import           Control.Concurrent  (getNumCapabilities)
+import           Control.Concurrent   (getNumCapabilities)
+import           Control.Monad.Logger
 import           Options.Applicative
 
 data Config = Config
-  { options :: Options
-  , feh     :: FilePath
-  , caps    :: Int
+  { options   :: Options
+  , feh       :: FilePath
+  , caps      :: Int
+  , logFilter :: LogLevel -> Bool
   }
 
 data Options = Options
@@ -50,4 +52,6 @@ getConfig = do
     { feh = feh
     , options = options
     , caps = caps
+    , logFilter = if verbose options then const True
+        else (>= LevelInfo)
     }
