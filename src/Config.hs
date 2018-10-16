@@ -1,26 +1,21 @@
-{-# LANGUAGE NamedFieldPuns #-}
-
 module Config where
 
-import           Control.Concurrent  (getNumCapabilities)
-import           Control.Monad       (when)
 import           Data.Maybe          (fromMaybe)
 import           System.Directory    (findExecutable)
-import           System.Environment  (getArgs)
 
+import           Control.Concurrent  (getNumCapabilities)
 import           Options.Applicative
 
 data Config = Config
-  { importdir :: FilePath
-  , hashdir   :: FilePath
-  , feh       :: FilePath
-  , caps      :: Int
-  } deriving Show
+  { options :: Options
+  , feh     :: FilePath
+  , caps    :: Int
+  }
 
 data Options = Options
-  { _importdir :: FilePath
-  , _hashdir   :: FilePath
-  , _verbose   :: Bool
+  { importdir :: FilePath
+  , hashdir   :: FilePath
+  , verbose   :: Bool
   }
 
 parser :: Parser Options
@@ -44,14 +39,15 @@ opts = info (parser <**> helper)
   <> header "hashsearch - import directories"
    )
 
+
+
 getConfig :: IO Config
 getConfig = do
-  Options { _importdir, _hashdir } <- execParser opts
+  options <- execParser opts
   feh <- fromMaybe (fail "No feh binary found in PATH") <$> findExecutable "feh"
   caps <- getNumCapabilities
-  return Config
-    { importdir = _importdir
-    , feh = feh
-    , hashdir = _hashdir
+  return $ Config
+    { feh = feh
+    , options = options
     , caps = caps
     }

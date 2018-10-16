@@ -66,7 +66,7 @@ data ImageInfo = ImageInfo
 -- TODO: Base64 encoding?
 hashbasedFilename :: MonadReader Config m => ImageInfo -> m FilePath
 hashbasedFilename ImageInfo { extension, perceptualHash, contentHash = FnvHash64 contentHashWord } = do
-  hashdir <- asks hashdir
+  hashdir <- asks (hashdir.options)
   return $ hashdir </> (printf "%016x" contentHashWord ++ "-" ++ show perceptualHash ++ extension)
 
 

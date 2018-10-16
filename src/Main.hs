@@ -21,9 +21,15 @@ import           Data.Either              (partitionEithers)
 import           Data.List                (findIndex, intercalate)
 import           Data.List.NonEmpty       (NonEmpty (..), toList)
 import qualified Data.Set.BKTree          as BK
+import qualified Data.Text                as Text
 import           System.Directory
 import           System.FilePath
 import           System.Process.Text      (readProcessWithExitCode)
+
+import           Control.Concurrent       (myThreadId)
+import           Control.Monad.Logger
+
+import           Log
 
 -- TODO: Copy files to /tmp for comparison with feh
 
@@ -37,75 +43,110 @@ import of a single file goes through the states:
 
 type Yielding = (FilePath, ImageInfo)
 
-readFiles :: (MonadReader Config m, MonadResource m, MonadUnliftIO m) => BK.BKTree ImageInfo -> Config -> ConduitT i o m (BK.BKTree ImageInfo, [Yielding])
-readFiles images Config { caps, importdir } =
-  C.sourceDirectoryDeep True importdir
-  .| C.mapM (\path -> (path,) <$> liftIO (BS.readFile path))
+readFiles :: (MonadLogger m, MonadReader Config m, MonadResource m, MonadUnliftIO m) => BK.BKTree ImageInfo -> Config -> ConduitT i o m (BK.BKTree ImageInfo, [Yielding])
+readFiles images Config { caps, options } = do
+  logInfoNS "process" "Starting image processing"
+  C.sourceDirectoryDeep True (importdir options)
+  .| C.mapM (\path -> do
+                bytes <- liftIO $ BS.readFile path
+                logDebugNS "process" ("Successfully read bytes from file" <> Text.pack path)
+                return (path, bytes)
+            )
   .| parMapM (Simple Drop) caps imageInfoIO
-  .| ins images (const yield)
+  .| importer images (const yield)
     `fuseBoth`
   C.sinkList
   where
-    imageInfoIO (path, bytes) = liftIO $ case getImageInfoBS (takeExtension path) bytes of
-      Left err   -> putStrLn err *> fail err
-      -- Force evaluation of the hashes on this thread which is run in parallel
-      Right info -> (path,) <$> (evaluate . seq (contentHash info) . seq (perceptualHash info) $ info)
+    imageInfoIO (path, bytes) = do
+      tid <- liftIO $ Text.pack . show <$> myThreadId
+      logDebugNS ("process-" <> tid) ("Processing bytes from path " <> Text.pack path)
+      case getImageInfoBS (takeExtension path) bytes of
+        Left err   -> do
+          logErrorNS ("process-" <> tid) ("Error while decoding image info from path " <> Text.pack path <> ": " <> Text.pack err)
+          liftIO $ fail err
+        -- Force evaluation of the hashes on this thread which is run in parallel
+        Right info -> do
+          logDebugNS ("process-" <> tid) ("Successfully processed bytes from path " <> Text.pack path)
+          liftIO $ (path,) <$> (evaluate . seq (contentHash info) . seq (perceptualHash info) $ info)
 
-ins images action = await >>= \case
-  Nothing -> return images
+
+importer :: (MonadIO m, MonadReader Config m, MonadLogger m) => BK.BKTree ImageInfo -> (NonEmpty ImageInfo -> Yielding -> ConduitT Yielding o m a) -> ConduitT Yielding o m (BK.BKTree ImageInfo)
+importer images action = await >>= \case
+  Nothing -> do
+    logDebugNS "process" "Done processing new images"
+    return images
   Just (path, new) -> case search images new of
     Present -> do
-      log "Already present, removing the import file"
+      logAction $ "Already present as " <> Text.pack (show new) <> ", removing the import file"
       liftIO $ removeFile path
-      ins images action
+      importer images action
     SimilarPictures infos -> do
-      log $ show (length infos) ++ " similar image(s) found, running action"
+      logAction $ Text.pack (show (length infos)) <> " similar image(s) found"
       action infos (path, new)
-      ins images action
+      -- FIXME: when action does importing, it should insert the new one into the tree
+      importer images action
     NotPresent -> do
-      log "New image, importing it"
+      logAction $ "New image, importing it as " <> Text.pack (show new)
       doImport (path, new)
-      ins (BK.insert new images) action
-    where
-      log :: MonadIO m => String -> m ()
-      log str = liftIO $ putStrLn $ "While testing " ++ path ++ ": " ++ str
+      importer (BK.insert new images) action
+    where logAction str = logInfoNS "process" ("New image at " <> Text.pack path <> ": " <> str)
+
+
 
 main :: IO ()
-main = do
+main = withLogs $ \queue -> do
   config <- getConfig
-  flip runReaderT config $ do
+  runQueueLoggingT queue $ flip runReaderT config $ do
     hashes <- getHashes
     (res, similar) <- runConduitRes (readFiles hashes config)
-    runConduit (sourceList similar .| ins res selectiveImport)
-    return ()
+    logInfoNS "similars" $ "Processing " <> Text.pack (show (length similar)) <> " similar images"
+    final <- runConduit (sourceList similar .| importer res selectiveImport)
+    logInfoN $ "Finished import of " <> Text.pack (show (BK.size final - BK.size hashes)) <> " images"
 
 
-getHashes :: (MonadIO m, MonadReader Config m) => m (BK.BKTree ImageInfo)
+getHashes :: (MonadLogger m, MonadIO m, MonadReader Config m) => m (BK.BKTree ImageInfo)
 getHashes = do
-  hashdir <- asks hashdir
+  logInfoNS "init" "Reading hashdir, decoding filenames and initializing database"
+  hashdir <- asks $ hashdir . options
   hashfiles <- liftIO $ fmap (hashdir </>) <$> listDirectory hashdir
+  logDebugNS "init" ("Decoding " <> textLength hashfiles <> " hashdir filenames")
   let (errors, images) = partitionEithers $ map getHashImageInfo hashfiles
-  if null errors then return $ BK.fromList images
-  else error $ intercalate "\n" errors
+  if null errors then do
+    logDebugNS "init" "Successfully read hashdir"
+    return $ BK.fromList images
+  else do
+    logErrorNS "init" ("Failed reading " <> textLength errors <> " filenames:")
+    forM_ errors $ logErrorNS "init" . ("  "<>) . Text.pack
+    error ""
+  where
+    textLength :: [a] -> Text.Text
+    textLength = Text.pack . show . length
 
-comparePics :: (MonadReader Config m, MonadIO m) => [FilePath] -> m ()
+comparePics :: (MonadLogger m, MonadReader Config m, MonadIO m) => [FilePath] -> m ()
 comparePics pics = do
   feh <- asks feh
   let args = pics ++ ["-A", "rm %F", "-g640x480", "-Z", "-.", "-Bblack"]
-  liftIO $ putStrLn $ "Starting feh with arguments " ++ unwords args
+  logDebugNS "similars" ("Starting feh with arguments " <> Text.pack (show args))
   liftIO $ readProcessWithExitCode feh args ""
   return ()
 
-selectiveImport :: (MonadReader Config m, MonadIO m) => NonEmpty ImageInfo -> (FilePath, ImageInfo) -> m ()
+selectiveImport :: (MonadLogger m, MonadReader Config m, MonadIO m) => NonEmpty ImageInfo -> (FilePath, ImageInfo) -> m ()
 selectiveImport candidates (path, new) = do
   paths <- forM (toList candidates) hashbasedFilename
+  logInfoNS "similar" $ "File " <> Text.pack path <> " to import has " <> Text.pack (show (length paths)) <> " similar images: "
+  forM_ paths $ logInfoNS "similar" . ("  " <>) . Text.pack
+  logInfoNS "similar" "  Opening them and the one to import in feh, delete the ones you don't want with <Enter>, then quit feh with <q>"
   comparePics (path : paths)
   filethere <- liftIO $ doesFileExist path
-  when filethere (doImport (path, new))
+  if filethere then do
+    logDebugNS "similar" $ "Path " <> Text.pack path <> " was not deleted, importing it"
+    doImport (path, new)
+  else logDebugNS "similar" $ "Path " <> Text.pack path <> " was deleted, not importing"
 
-doImport :: (MonadReader Config m, MonadIO m) => (FilePath, ImageInfo) -> m ()
+doImport :: (MonadLogger m, MonadReader Config m, MonadIO m) => (FilePath, ImageInfo) -> m ()
 doImport (path, new) = do
   importDestination <- hashbasedFilename new
+  logDebugNS "similar" $ "Importing new file " <> Text.pack path <> " into library to path " <> Text.pack importDestination
   liftIO $ copyFileWithMetadata path importDestination
   liftIO $ removeFile path
 
