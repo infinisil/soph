@@ -103,14 +103,16 @@ main :: IO ()
 main = do
   config <- getConfig
   withLogs (logFilter config) $ \queue -> runQueueLoggingT queue $ flip runReaderT config $ do
-    hashes <- getHashes
-    (res, similar) <- runConduitRes (readFiles hashes config)
-    logInfoNS "similars" $ "Processing " <> Text.pack (show (length similar)) <> " similar images"
-    final <- runConduit (sourceList similar .| importer res selectiveImport)
-    logInfoN $ "Finished import of " <> Text.pack (show (BK.size final - BK.size hashes)) <> " images"
+    getHashes >>= \case
+      Nothing -> return ()
+      Just hashes -> do
+        (res, similar) <- runConduitRes (readFiles hashes config)
+        logInfoNS "similars" $ "Processing " <> Text.pack (show (length similar)) <> " similar images"
+        final <- runConduit (sourceList similar .| importer res selectiveImport)
+        logInfoN $ "Finished import of " <> Text.pack (show (BK.size final - BK.size hashes)) <> " images"
 
 
-getHashes :: (MonadLogger m, MonadIO m, MonadReader Config m) => m (BK.BKTree ImageInfo)
+getHashes :: (MonadLogger m, MonadIO m, MonadReader Config m) => m (Maybe (BK.BKTree ImageInfo))
 getHashes = do
   logInfoNS "init" "Reading hashdir, decoding filenames and initializing database"
   hashdir <- asks $ hashdir . options
@@ -119,11 +121,11 @@ getHashes = do
   let (errors, images) = partitionEithers $ map getHashImageInfo hashfiles
   if null errors then do
     logDebugNS "init" "Successfully read hashdir"
-    return $ BK.fromList images
+    return $ Just $ BK.fromList images
   else do
     logErrorNS "init" ("Failed reading " <> textLength errors <> " filenames:")
     forM_ errors $ logErrorNS "init" . ("  "<>) . Text.pack
-    error ""
+    return Nothing
   where
     textLength :: [a] -> Text.Text
     textLength = Text.pack . show . length
