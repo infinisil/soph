@@ -1,6 +1,6 @@
 with import ./. {};
 
-shellFor {
-  packages = p: [ hashsearch ];
-  nativeBuildInputs = [ cabal-install ];
+hpkgs.shellFor {
+  packages = p: [ hpkgs.hashsearch ];
+  nativeBuildInputs = [ hpkgs.cabal-install ];
 }
