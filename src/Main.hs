@@ -27,6 +27,7 @@ import           System.FilePath
 import           System.Process.Text      (readProcessWithExitCode)
 
 import           Control.Concurrent       (myThreadId)
+import           Control.Concurrent.STM
 import           Control.Monad.Logger
 
 import           Log
@@ -45,22 +46,24 @@ type Yielding = (FilePath, ImageInfo)
 
 readFiles :: (MonadLogger m, MonadReader Config m, MonadResource m, MonadUnliftIO m) => BK.BKTree ImageInfo -> Config -> ConduitT i o m (BK.BKTree ImageInfo, [Yielding])
 readFiles images Config { caps, options } = do
-  logInfoNS "process" "Starting image processing"
-  C.sourceDirectoryDeep True (importdir options)
-  .| C.mapM (\path -> do
-                bytes <- liftIO $ BS.readFile path
-                logDebugNS "process" ("Successfully read bytes from file" <> Text.pack path)
-                return (path, bytes)
-            )
-  .| parMapM (Simple Drop) caps imageInfoIO
-  .| importer images (\info y -> yield y *> return False)
-    `fuseBoth`
-  C.sinkList
+  files <- runConduit $ C.sourceDirectoryDeep True (importdir options) .| C.sinkList
+  logInfoNS "process" $ "Starting image processing of " <> Text.pack (show (length files)) <> " files in import directory"
+  todo <- liftIO $ newTVarIO (length files)
+  (sourceList files
+    .| C.mapM (\path -> do
+                  bytes <- liftIO $ BS.readFile path
+                  logDebugNS "process" ("Successfully read bytes from file" <> Text.pack path)
+                  return (path, bytes)
+              )
+    .| parMapM (Simple Drop) caps (imageInfoIO todo)
+    .| importer images (\info y -> yield y *> return False)
+    ) `fuseBoth` C.sinkList
   where
-    imageInfoIO (path, bytes) = do
+    imageInfoIO todo (path, bytes) = do
       tid <- liftIO $ Text.pack . show <$> myThreadId
-      logDebugNS ("process-" <> tid) ("Processing bytes from path " <> Text.pack path)
-      case getImageInfoBS (takeExtension path) bytes of
+      index <- show <$> liftIO (readTVarIO todo)
+      logDebugNS ("process-" <> tid) $ "[" <> Text.pack index <> "] Processing bytes from path " <> Text.pack path
+      result <- case getImageInfoBS (takeExtension path) bytes of
         Left err   -> do
           logErrorNS ("process-" <> tid) ("Error while decoding image info from path " <> Text.pack path <> ": " <> Text.pack err)
           liftIO $ fail err
@@ -68,6 +71,9 @@ readFiles images Config { caps, options } = do
         Right info -> do
           logDebugNS ("process-" <> tid) ("Successfully processed bytes from path " <> Text.pack path)
           liftIO $ (path,) <$> (evaluate . seq (contentHash info) . seq (perceptualHash info) $ info)
+      liftIO $ atomically $ modifyTVar' todo (\x -> x - 1)
+      return result
+
 
 
 importer :: (MonadIO m, MonadReader Config m, MonadLogger m) => BK.BKTree ImageInfo -> (NonEmpty ImageInfo -> Yielding -> ConduitT Yielding o m Bool) -> ConduitT Yielding o m (BK.BKTree ImageInfo)
