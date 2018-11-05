@@ -83,7 +83,8 @@ importer images action = await >>= \case
     return images
   Just (path, new) -> case search images new of
     Present -> do
-      logAction $ "Already present as " <> Text.pack (show new) <> ", removing the import file"
+      presentFile <- hashbasedFilename new
+      logAction $ "Already present as " <> Text.pack presentFile <> ", removing the import file"
       liftIO $ removeFile path
       importer images action
     SimilarPictures infos -> do
@@ -92,7 +93,7 @@ importer images action = await >>= \case
       -- FIXME: when action does importing, it should insert the new one into the tree
       importer (if importit then BK.insert new images else images) action
     NotPresent -> do
-      logAction $ "New image, importing it as " <> Text.pack (show new)
+      logAction "New image, importing it"
       doImport (path, new)
       importer (BK.insert new images) action
     where logAction str = logInfoNS "process" ("New image at " <> Text.pack path <> ": " <> str)
@@ -157,7 +158,7 @@ selectiveImport candidates (path, new) = do
 doImport :: (MonadLogger m, MonadReader Config m, MonadIO m) => (FilePath, ImageInfo) -> m ()
 doImport (path, new) = do
   importDestination <- hashbasedFilename new
-  logDebugNS "similar" $ "Importing new file " <> Text.pack path <> " into library to path " <> Text.pack importDestination
+  logInfoNS "process" $ "Importing new file " <> Text.pack path <> " into library to path " <> Text.pack importDestination
   liftIO $ copyFileWithMetadata path importDestination
   liftIO $ removeFile path
 
