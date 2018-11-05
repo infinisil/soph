@@ -29,6 +29,7 @@ import           System.Process.Text      (readProcessWithExitCode)
 import           Control.Concurrent       (myThreadId)
 import           Control.Concurrent.STM
 import           Control.Monad.Logger
+import           Data.Functor             (($>))
 
 import           Log
 
@@ -56,7 +57,7 @@ readFiles images Config { caps, options } = do
                   return (path, bytes)
               )
     .| parMapM (Simple Drop) caps (imageInfoIO todo)
-    .| importer images (\info y -> yield y *> return False)
+    .| importer images (\info y -> yield y $> False)
     ) `fuseBoth` C.sinkList
   where
     imageInfoIO todo (path, bytes) = do
@@ -103,7 +104,7 @@ importer images action = await >>= \case
 main :: IO ()
 main = do
   config <- getConfig
-  withLogs (logFilter config) $ \queue -> runQueueLoggingT queue $ flip runReaderT config $ do
+  withLogs (logFilter config) $ \queue -> runQueueLoggingT queue $ flip runReaderT config $
     getHashes >>= \case
       Nothing -> return ()
       Just hashes -> do
