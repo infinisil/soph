@@ -1,0 +1,15 @@
+resolver: lts-12.16
+
+packages:
+- .
+
+extra-deps:
+- bktrees-0.3.1
+- blockhash-0.1.0.0
+- broadcast-chan-0.2.0.1
+- broadcast-chan-conduit-0.2.0.1
+
+allow-newer: true
+
+nix:
+  packages: [ zlib ]
