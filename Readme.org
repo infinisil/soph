@@ -1,0 +1,62 @@
+* Hashsearch (temporary name)
+
+This is a simple utility to import pictures while handling duplicates gracefully.
+
+Note that this is yet unstable. Current versions will almost certainly not work with future versions, due to differences in hash formatting (until I've added version migration support). This isn't a big problem however, because it's possible to just reimport all pictures.
+
+** Usage
+
+To import all pictures from directory `imports` to `collection`:
+#+BEGIN_SRC bash
+$ hashsearch imports collection
+#+END_SRC
+
+This will:
+1. Do a file listing of ~collection~ to know previously imported images
+2. Process every picture in ~imports~ (recursively)
+  2a. Calculate a content hash over it to know exact duplicates ([[https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_hash_function#FNV-1a_hash][Fnv1a hash]])
+  2b. Calculate a [[https://en.wikipedia.org/wiki/Perceptual_hashing][perceptual hash]] over it to be able to detect similar images ([[http://blockhash.io/][Blockhash]])
+3. Import every picture in ~imports~ into ~collection~
+  3a. If the new picture is already present (same content hash), delete it
+  3b. If the new picture is not yet present, import it
+  3c. If the new picture has similar images present, open all of them in ~feh~, allowing you to delete the ones you don't want with ~<Enter>~. Use the arrow keys for navigating between them, ~q~ to quit. If after that the new one wasn't deleted, import it.
+
+Importing means: Copy the file into ~collection~ while giving it a hash-based filename, derived from both the content hash and perceptual hash. This allows a simple directory listing to extract all this information.
+
+Here is an example run:
+#+BEGIN_SRC 
+[Info#init] Reading hashdir, decoding filenames and initializing database
+[Info#process] Starting image processing of 4 files in import directory
+[Info#process] New image at /home/infinisil/pics/import/test.jpg: New image, importing it as ImageInfo {extension = ".jpg", contentHash = FnvHash64 5735595682590919281, perceptualHash = f1fe05e00f85f80f80e20e70ef0dd89e0f80}
+[Info#process] New image at /home/infinisil/pics/import/foo.jpg: New image, importing it as ImageInfo {extension = ".jpg", contentHash = FnvHash64 7844038488026467621, perceptualHash = 06605f0f78e3d81bc1fe01e10f18032633f7}
+[Info#process] New image at /home/infinisil/pics/import/photo_2018-11-03_16-55-12.jpg: 1 similar image(s) found
+[Info#process] New image at /home/infinisil/pics/import/0245fae2248f566d-03f07f02d03f07703713f03f11311f04707f.png: Already present as ImageInfo {extension = ".png", contentHash = FnvHash64 163812810651817581, perceptualHash = 03f07f02d03f07703713f03f11311f04707f}, removing the import file
+[Info#similars] Processing 1 similar images
+[Info#process] New image at /home/infinisil/pics/import/photo_2018-11-03_16-55-12.jpg: 1 similar image(s) found
+[Info#similar] File /home/infinisil/pics/import/photo_2018-11-03_16-55-12.jpg to import has 1 similar images:
+[Info#similar]   /ssh/inf/server/data/anime/795d7bd4c96d5dba-f33a21d119fbbc1802f07e03e03c03c47e47.jpg
+[Info#similar]   Opening them and the one to import in feh, delete the ones you don't want with <Enter>, then quit feh with <q>
+[Info] Finished import of 3 images
+#+END_SRC
+
+Note: The output is a bit misleading, since it reports the same picture twice. This is due to it actually first doing a pass through all images without asking the user for similar pictures first (it just skips them), then when that's done it does another pass through all the similar pictures with actually asking the user this time and doing the appropriate action. Really desirable on large imports.
+
+** Installing
+
+*** Nix (recommended)
+
+The preferred way to install is with [[https://nixos.org/nix/][Nix]]:
+
+#+BEGIN_SRC bash
+$ nix-env -if .
+#+END_SRC
+
+Most derivations are cached by ~cache.nixos.org~ so it won't take too long to build.
+
+*** Stack
+
+If you don't have Nix but [[https://haskell-lang.org/get-started][Stack]], you can (probably) install it with:
+
+#+BEGIN_SRC bash
+$ stack install
+#+END_SRC
