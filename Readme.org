@@ -6,7 +6,7 @@ Note that this is yet unstable. Current versions will almost certainly not work 
 
 ** Usage
 
-To import all pictures from directory `imports` to `collection`:
+To import all pictures from directory ~imports~ to ~collection~:
 #+BEGIN_SRC bash
 $ hashsearch imports collection
 #+END_SRC
