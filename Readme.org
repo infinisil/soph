@@ -16,7 +16,7 @@ If similar images have been found after processing, a ~feh~ window will open wit
 Importing means: Copy the file into ~collection~ while giving it a hash-based filename. This allows a simple directory listing of ~collection~ to extract all this information. So in a way the filenames act as a database.
 
 Here is an example run with one new image, one similar one and one exactly the same.
-#+BEGIN_SRC bash
+#+BEGIN_SRC
 $ hashsearch imports collection
 [Info#init] Reading hashdir, decoding filenames and initializing database
 [Info#process] Starting image processing of 3 files in import directory
