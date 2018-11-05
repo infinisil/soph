@@ -14,12 +14,12 @@ $ hashsearch imports collection
 This will:
 1. Do a file listing of ~collection~ to know previously imported images
 2. Process every picture in ~imports~ (recursively)
-  2a. Calculate a content hash over it to know exact duplicates ([[https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_hash_function#FNV-1a_hash][Fnv1a hash]])
-  2b. Calculate a [[https://en.wikipedia.org/wiki/Perceptual_hashing][perceptual hash]] over it to be able to detect similar images ([[http://blockhash.io/][Blockhash]])
+   a. Calculate a content hash over it to know exact duplicates ([[https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_hash_function#FNV-1a_hash][Fnv1a hash]])
+   b. Calculate a [[https://en.wikipedia.org/wiki/Perceptual_hashing][perceptual hash]] over it to be able to detect similar images ([[http://blockhash.io/][Blockhash]])
 3. Import every picture in ~imports~ into ~collection~
-  3a. If the new picture is already present (same content hash), delete it
-  3b. If the new picture is not yet present, import it
-  3c. If the new picture has similar images present, open all of them in ~feh~, allowing you to delete the ones you don't want with ~<Enter>~. Use the arrow keys for navigating between them, ~q~ to quit. If after that the new one wasn't deleted, import it.
+   a. If the new picture is already present (same content hash), delete it
+   b. If the new picture is not yet present, import it
+   c. If the new picture has similar images present, open all of them in ~feh~, allowing you to delete the ones you don't want with ~<Enter>~. Use the arrow keys for navigating between them, ~q~ to quit. If after that the new one wasn't deleted, import it.
 
 Importing means: Copy the file into ~collection~ while giving it a hash-based filename, derived from both the content hash and perceptual hash. This allows a simple directory listing to extract all this information.
 
