@@ -59,6 +59,8 @@ $ nix-env -if .
 
 Most derivations are cached by ~cache.nixos.org~ so it won't take too long to build.
 
+This also automatically makes sure ~feh~ is available.
+
 *** Stack
 
 If you don't have Nix but [[https://haskell-lang.org/get-started][Stack]], you can (probably) install it with:
@@ -66,3 +68,5 @@ If you don't have Nix but [[https://haskell-lang.org/get-started][Stack]], you c
 #+BEGIN_SRC bash
 $ stack install
 #+END_SRC
+
+You also need to install ~feh~.
