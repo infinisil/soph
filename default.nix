@@ -12,7 +12,9 @@ let
 
   hpkgs = (pkgs.haskellPackages.extend (hlib.packageSourceOverrides {
     hashsearch = lib.cleanSourceWith {
-      filter = name: type: baseNameOf (toString name) != "dist" && ! lib.hasSuffix ".nix" name;
+      filter = name: type: baseNameOf (toString name) != "dist"
+        && baseNameOf (toString name) != "test"
+        && ! lib.hasSuffix ".nix" name;
       src = lib.cleanSource ./.;
     };
   })).extend (self: super: {
