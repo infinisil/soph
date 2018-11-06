@@ -11,17 +11,17 @@ let
   hlib = pkgs.haskell.lib;
 
   hpkgs = (pkgs.haskellPackages.extend (hlib.packageSourceOverrides {
-    hashsearch = lib.cleanSourceWith {
+    soph = lib.cleanSourceWith {
       filter = name: type: baseNameOf (toString name) != "dist"
         && baseNameOf (toString name) != "test"
         && ! lib.hasSuffix ".nix" name;
       src = lib.cleanSource ./.;
     };
   })).extend (self: super: {
-    hashsearch = super.hashsearch.overrideAttrs (drv: {
+    soph = super.soph.overrideAttrs (drv: {
       nativeBuildInputs = drv.nativeBuildInputs or [] ++ [ pkgs.makeWrapper ];
       postInstall = drv.postInstall or "" + ''
-        wrapProgram $out/bin/hashsearch \
+        wrapProgram $out/bin/soph \
           --prefix PATH : "${pkgs.lib.makeBinPath [ pkgs.feh ]}"
       '';
     });
@@ -35,6 +35,6 @@ let
     broadcast-chan-tests = hlib.addBuildDepend super.broadcast-chan-tests self.broadcast-chan;
   });
 in
-  hpkgs.hashsearch // {
+  hpkgs.soph // {
     inherit pkgs hpkgs;
   }

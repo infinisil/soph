@@ -38,7 +38,7 @@ opts :: ParserInfo Options
 opts = info (parser <**> helper)
    ( fullDesc
   <> progDesc "Import files"
-  <> header "hashsearch - import directories"
+  <> header "soph - import directories"
    )
 
 

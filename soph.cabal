@@ -1,8 +1,8 @@
-name:                hashsearch
+name:                soph
 version:             0.1.0.0
 synopsis:            Efficiently deduplicate image collections
 -- description:
-homepage:            https://github.com/infinisil/hashsearch#readme
+homepage:            https://github.com/infinisil/soph#readme
 license:             BSD3
 license-file:        LICENSE
 author:              Silvan Mosberger
@@ -13,7 +13,7 @@ build-type:          Simple
 cabal-version:       >=1.10
 extra-source-files:  Readme.org
 
-executable hashsearch
+executable soph
   hs-source-dirs:      src
   main-is:             Main.hs
   default-language:    Haskell2010

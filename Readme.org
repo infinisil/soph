@@ -1,4 +1,4 @@
-* Hashsearch (temporary name)
+* Soph
 
 This is a simple utility to import pictures while handling duplicates gracefully.
 
@@ -8,7 +8,7 @@ Note that this is yet unstable. Current versions will almost certainly not work 
 
 To import all pictures from directory ~imports~ to ~collection~:
 #+BEGIN_SRC bash
-$ hashsearch imports collection
+$ soph imports collection
 #+END_SRC
 
 If similar images have been found after processing, a ~feh~ window will open with all of them (the new picture and the similar ones in the collection). Use the arrow keys to scroll through them and delete the one(s) you don't want by pressing ~<Enter>~, then quit with ~q~.
@@ -17,7 +17,7 @@ Importing means: Copy the file into ~collection~ while giving it a hash-based fi
 
 Here is an example run with one new image, one similar one and one exactly the same.
 #+BEGIN_SRC
-$ hashsearch imports collection
+$ soph imports collection
 [Info#init] Reading hashdir, decoding filenames and initializing database
 [Info#process] Starting image processing of 3 files in import directory
 [Info#process] New image at imports/002.jpg: 1 similar image(s) found
