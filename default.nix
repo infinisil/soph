@@ -10,15 +10,12 @@ let
   inherit (pkgs) lib;
   hlib = pkgs.haskell.lib;
 
-  hpkgs = (pkgs.haskellPackages.extend (hlib.packageSourceOverrides {
-    soph = lib.cleanSourceWith {
-      filter = name: type: baseNameOf (toString name) != "dist"
-        && baseNameOf (toString name) != "test"
-        && ! lib.hasSuffix ".nix" name;
-      src = lib.cleanSource ./.;
-    };
-  })).extend (self: super: {
-    soph = super.soph.overrideAttrs (drv: {
+  hpkgs = pkgs.haskellPackages.extend (self: super: {
+    soph = (self.callCabal2nix "soph" (lib.sourceByRegex ./. [
+      "^\\src.*$"
+      "^.*\\.cabal$"
+      "^LICENSE$"
+    ]) {}).overrideAttrs (drv: {
       nativeBuildInputs = drv.nativeBuildInputs or [] ++ [ pkgs.makeWrapper ];
       postInstall = drv.postInstall or "" + ''
         wrapProgram $out/bin/soph \
@@ -27,14 +24,10 @@ let
     });
 
     blockhash = hlib.doJailbreak super.blockhash;
-
     tasty-travis = hlib.doJailbreak super.tasty-travis;
-
     broadcast-chan = self.callHackage "broadcast-chan" "0.2.0.1" {};
-
     broadcast-chan-tests = hlib.addBuildDepend super.broadcast-chan-tests self.broadcast-chan;
   });
-in
-  hpkgs.soph // {
-    inherit pkgs hpkgs;
-  }
+in hpkgs.soph // {
+  inherit pkgs hpkgs;
+}
