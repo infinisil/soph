@@ -12,7 +12,7 @@ let
 
   hpkgs = pkgs.haskellPackages.extend (self: super: {
     soph = (self.callCabal2nix "soph" (lib.sourceByRegex ./. [
-      "^\\src.*$"
+      "^src.*$"
       "^.*\\.cabal$"
       "^LICENSE$"
     ]) {}).overrideAttrs (drv: {
