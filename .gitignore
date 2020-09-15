@@ -1,4 +1,5 @@
 dist
-result
+result*
 test
 .stack-work
+bazel*

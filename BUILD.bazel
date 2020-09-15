@@ -1,0 +1,76 @@
+# Set all target’s visibility in this package to "public".
+package(default_visibility = ["//visibility:public"])
+
+# Load rules_haskell rules.
+load(
+    "@rules_haskell//haskell:defs.bzl",
+    "haskell_toolchain_library",
+    "haskell_binary",
+)
+load(
+    "@rules_haskell//haskell:cabal.bzl",
+    "haskell_cabal_binary",
+)
+
+
+# Define haskell toolchain libraries. These are all the ones listed in soph.cabal
+[
+    haskell_toolchain_library(name = name)
+    for name in [
+        "base",
+        "process-extras",
+        "directory",
+        "filepath",
+        "vector",
+        "mtl",
+        "monad-logger",
+        "blockhash",
+        "JuicyPixels",
+        "memory",
+        "bytestring",
+        "conduit",
+        "broadcast-chan-conduit",
+        "bktrees",
+        "optparse-applicative",
+        "async",
+        "stm-chans",
+        "text",
+        "stm",
+    ]
+]
+
+# This would also work, but it's slower and probably doesn't rebuild based on a per-file basis
+#haskell_cabal_binary(
+#    name = "soph",
+#    srcs = glob([
+#       "src/**",
+#       "*.cabal",
+#       "LICENSE",
+#   ]),
+#)
+
+haskell_binary(
+    name = "soph",
+    srcs = glob(["src/**"]),
+    deps = [
+        ":base",
+        ":process-extras",
+        ":directory",
+        ":filepath",
+        ":vector",
+        ":mtl",
+        ":monad-logger",
+        ":blockhash",
+        ":JuicyPixels",
+        ":memory",
+        ":bytestring",
+        ":conduit",
+        ":broadcast-chan-conduit",
+        ":bktrees",
+        ":optparse-applicative",
+        ":async",
+        ":stm-chans",
+        ":stm",
+        ":text",
+    ],
+)

@@ -30,4 +30,5 @@ let
   });
 in hpkgs.soph // {
   inherit pkgs hpkgs;
+  ghc = hpkgs.ghcWithPackages (p: p.soph.getBuildInputs.haskellBuildInputs);
 }
