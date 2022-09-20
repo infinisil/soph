@@ -4,7 +4,8 @@ let
     sha256 = "0xwlbs3sffsjgbc00gadmyi14q1b7ww0fgj0nxa77dip27jzywn1";
   };
 in
-{ pkgs ? import nixpkgs {}
+{ pkgs ? import nixpkgs { overlays = []; config = {}; inherit system; }
+, system ? builtins.currentSystem
 }:
 let
   inherit (pkgs) lib;
